@@ -73,6 +73,8 @@ class KeyValue{
         }
     });
 }
+
+
 public Future<Boolean> deleteTask(String key, boolean logOrNot) {
     return threadPool.submit(() -> {
         boolean locked = logLock.tryLock(2, TimeUnit.SECONDS);

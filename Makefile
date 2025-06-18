@@ -1,6 +1,6 @@
 SRC_DIR = src
-BIN_DIR = $(SRC_DIR)/bin
-MAIN_CLASS = Main
+BIN_DIR = bin
+MAIN_CLASS = LoadBalancer.LoadBalancer  # update if needed
 
 .PHONY: build run runf clean
 
@@ -11,7 +11,7 @@ build:
 	rm sources.txt
 
 run: build
-	java -cp $(BIN_DIR) src.Main
+	java -cp $(BIN_DIR) $(MAIN_CLASS)
 
 runf: run
 

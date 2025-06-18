@@ -11,6 +11,8 @@ import java.util.List;
 //import java.util.ArrayList;
 import java.util.concurrent.*;
 
+import src.hashing.*;
+
 public class Main{
 
   public static boolean replayLogs(KeyValue masterNode) {
@@ -93,14 +95,14 @@ public class Main{
                 System.out.println("[ERROR] Task failed: " + e.getMessage());
             }
         }
-    } catch (Exception e) {
+    }catch (Exception e) {
         System.out.println("[ERROR] Unexpected error in basicTest: " + e.getMessage());
     }
     }
 
     public static void main(String[] args){
 
-    final int threadPoolSize = 50;
+    /*final int threadPoolSize = 50;
     
     String logFilePath = "src/log/master.log";
 
@@ -134,6 +136,19 @@ public class Main{
     }catch(IOException e){
         System.out.println(e.getMessage());
     }
+*/ 
+
+    sha1HashFunction hashFun = new sha1HashFunction(); 
+    ConsistentHashing ring = new ConsistentHashing(hashFun, 3);
+
+    ring.addNode(new Node("NodeA"));
+    ring.addNode(new Node("NodeB"));
+    ring.addNode(new Node("NodeC"));    
+
+    System.out.println("Hash for apple: "  + ring.getNode("apple"));
+    System.out.println("same: " + ring.getNode("apple"));    
+    System.out.println("Hash for ball: " + ring.getNode("ball"));
+
 
     }
 }
