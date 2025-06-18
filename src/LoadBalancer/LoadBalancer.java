@@ -7,12 +7,61 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.InetAddress;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.util.ArrayList;
 import java.util.List;
 import src.hashing.*;
 import src.log.Log;
 
+class Pinger implements Runnable{
+
+private List<String> nodes = null;
+private static int TIMEOUT = 2000;
+private ConsistentHashing hashRing = null;
+
+Pinger(List<String> servers, ConsistentHashing HashRing){
+    nodes = servers;
+    hashRing = HashRing;
+}
+
+@Override
+public void run(){
+
+    while(true){
+        for(String server: new ArrayList<>(nodes)){
+            try{
+                boolean isWorking = InetAddress.getByName(server).isReachable(TIMEOUT);
+                if(!isWorking){
+                    this.deleteNodeToHashRing(server);
+                }else{
+                    this.addNodeToHashRing(server);
+                }
+
+            }catch(Exception e){
+                System.out.println("[ERROR]:" + e.getMessage());
+            }
+        }
+        try{Thread.sleep(5000);}
+        catch(InterruptedException e){
+            System.out.println("Daemon thread Error:" + e.getMessage());
+            Thread.currentThread().interrupt();
+        }
+    }
+}
+
+private void addNodeToHashRing(String node){
+    hashRing.addNode(new Node(node));
+        System.out.println("[INFO] Node " + node + " added to the hash ring :P");
+}
+
+private void deleteNodeToHashRing(String node){
+    hashRing.removeNode(new Node(node));
+    System.out.println("[INFO] Node " + node + " removed from hash ring");
+
+}
+}
 
 public class LoadBalancer{
 
@@ -136,6 +185,15 @@ public class LoadBalancer{
         Gson gson = new Gson();
 
         LoadBalancer lb = new LoadBalancer();
+
+        Pinger pinger = new Pinger(LoadBalancer.nodes, LoadBalancer.hashRing);
+
+        //Runs in background to ping all servers and removes if inactive.
+        Thread daemonPinger = new Thread(pinger);
+        daemonPinger.setDaemon(true);
+
+        System.out.println("[INFO] Daemon Pinger is starting :P ....");
+        daemonPinger.start();
 
         post("/put", (req, res) -> {
             res.type("application/json");
