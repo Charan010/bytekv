@@ -1,5 +1,7 @@
 package src;
 
+/* A basic instance of testing (not a server yet). Need to write multiple servers :P */
+
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.FileReader;
@@ -74,6 +76,7 @@ public class Main{
 
     System.out.println("[INFO] Log replay completed.");
     return true;
+
 }
 
     public static void basicTest(KeyValue masterNode) {
@@ -102,53 +105,13 @@ public class Main{
 
     public static void main(String[] args){
 
-    /*final int threadPoolSize = 50;
-    
-    String logFilePath = "src/log/master.log";
-
-    ConcurrentHashMap<String,String> hm = new ConcurrentHashMap<>();
-
-    BufferedWriter bw = null;
-
-    try{
-        bw = new BufferedWriter(new FileWriter(logFilePath, true));
-    }
-    catch(IOException e){
-        System.out.println("log file doesnt exist " + e.getMessage());
-    }
-
-    KeyValue masterNode = new KeyValue(hm, threadPoolSize,bw);
-    
-    masterNode.emptyKVStore();
-    System.out.println("[INFO]: Starting Basic test to simulate");
-    Main.basicTest(masterNode);
-
-    System.out.println("[INFO]: Starting Log replaying");
-    Main.replayLogs(masterNode);
-
-    masterNode.getAllKV();
-    masterNode.shutdown();
-
-    try{
-    bw.flush();
-    bw.close();
-    
-    }catch(IOException e){
-        System.out.println(e.getMessage());
-    }
-*/ 
-
+    //test purpose :P config done already in load balancer    
     sha1HashFunction hashFun = new sha1HashFunction(); 
     ConsistentHashing ring = new ConsistentHashing(hashFun, 3);
 
-    ring.addNode(new Node("NodeA"));
-    ring.addNode(new Node("NodeB"));
-    ring.addNode(new Node("NodeC"));    
-
-    System.out.println("Hash for apple: "  + ring.getNode("apple"));
-    System.out.println("same: " + ring.getNode("apple"));    
-    System.out.println("Hash for ball: " + ring.getNode("ball"));
-
+    //ring.addNode(new Node("pornhub"));
+    //ring.addNode(new Node("youtube"));
+    //ring.addNode(new Node("reddit"));    
 
     }
 }
