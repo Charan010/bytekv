@@ -1,79 +1,97 @@
 package src;
+
+/* this "engine" could be thrown into a .jar file or container so servers can use it */
+
 import java.util.Map;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantLock;
 import java.io.BufferedWriter;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.nio.*;
+import java.nio.charset.StandardCharsets;
 
 class KeyValue{
 
-    private final ConcurrentHashMap<String, String> kvStore;
+    //changing from String to bytes[] for performance as String is bloated
+    private final ConcurrentHashMap<ByteBuffer, byte[]> kvStore;
     private final ExecutorService threadPool;
+    //will deal with it later. can be used for auditing for internal bugs or smtg.
     private final BlockingQueue<Runnable> deadLetterQueue = new LinkedBlockingDeque<>();
     private final ReentrantLock logLock = new ReentrantLock();
     private final int tpSize;
 
-    BufferedWriter bufferWriter;
+    BufferedWriter writer;
+    FileOutputStream fos; 
 
-    public KeyValue(ConcurrentHashMap<String, String> hm, int threadPoolSize, BufferedWriter bw) {
-    this.kvStore = hm;
-    this.bufferWriter = bw;
-    this.tpSize = threadPoolSize;
+    public KeyValue(ConcurrentHashMap<ByteBuffer, byte[]> hm, int threadPoolSize) {
+        this.kvStore = hm;
+        this.tpSize = threadPoolSize;
 
-    BlockingQueue<Runnable> taskQueue = new ArrayBlockingQueue<>(100);
+        try{
+        this.writer = new BufferedWriter(
+        new OutputStreamWriter(
+            new FileOutputStream("src/log/master.log", true),
+            StandardCharsets.UTF_8
+            )
+        );
 
-    this.threadPool = new ThreadPoolExecutor(
-        threadPoolSize,
-        threadPoolSize,
-        0L, TimeUnit.MILLISECONDS,
-        taskQueue,
-        Executors.defaultThreadFactory(),
+        this.fos = new FileOutputStream("src/log/master.log", true);
 
-        (runnable, executor) -> {
-                System.out.println("Blocking queue full. Will be waiting until empty. Current task queue size: " + taskQueue.size());
-                // TO-DO: When task queue gets full. Im simply rejecting the task (like my crush) for now.
-        }      
-    );
-}
-    public Future<String> getTask(String key){
-            return threadPool.submit(() -> {
-                return kvStore.get(key);
-        });
-
-    }
-
-    public Future<Boolean> addTask(String key, String value, boolean logOrNot) {
-    return threadPool.submit(() -> {
-        if (kvStore.containsKey(key)) {
-            System.out.println("[INFO] Key already exists: " + key);
-            return false;
+        }catch(FileNotFoundException error){
+            System.out.println("Error:" + error.getMessage());
         }
 
+    //can hold x threads in a queue when threadpool is exhausted.
+        BlockingQueue<Runnable> taskQueue = new ArrayBlockingQueue<>(this.tpSize);
+
+        this.threadPool = new ThreadPoolExecutor(
+            threadPoolSize,
+            threadPoolSize,
+            0L, TimeUnit.MILLISECONDS,
+            taskQueue,
+            Executors.defaultThreadFactory()
+        );
+    }
+
+    public Future<Boolean> getTask(String key){
+            return threadPool.submit(() -> {
+                ByteBuffer keyBuffer = ByteBuffer.wrap(key.getBytes(StandardCharsets.UTF_8));
+                return kvStore.get(keyBuffer)!=null;
+        });
+    }
+
+  public Future<Boolean> addTask(String key, String value, boolean shouldLog) {
+    return threadPool.submit(() -> {
+        ByteBuffer keyBuffer = ByteBuffer.wrap(key.getBytes(StandardCharsets.UTF_8));
+        byte[] valueBytes = value.getBytes(StandardCharsets.UTF_8);
+
+        /*  try to pick the lock after 2 seconds to stop getting fucking deadlock
+            in log file otherwise fkk em :P */   
         boolean locked = logLock.tryLock(2, TimeUnit.SECONDS);
         if (!locked) {
             System.out.println("[WARN] Couldn't acquire log lock for PUT key: " + key);
             return false;
         }
 
-        try {
-            if (logOrNot) {
-                bufferWriter.write("PUT " + key + " " + value);
-                bufferWriter.newLine();
-                bufferWriter.flush();
-                System.out.println("[INFO] PUT logged: " + key);
+            // Dont need to log when replaying from log file when on startup.
+            if (shouldLog) {
+                writer.write("PUT " + key + " " + value);
+                writer.newLine();
+                writer.flush();
+            /*  forces to flush data to disk rather than being on os cache.
+            little expensive but tradeoff is worth i guess.  */
+                fos.getFD().sync(); 
             }
-            kvStore.put(key, value);
+
+            kvStore.put(keyBuffer, valueBytes);
+            logLock.unlock();
             return true;
 
-        }catch (IOException e){
-            System.out.println("[ERROR] Failed to write PUT log for key: " + key);
-            return false;
-        } finally {
-            logLock.unlock();
-        }
     });
 }
-
 
 public Future<Boolean> deleteTask(String key, boolean logOrNot) {
     return threadPool.submit(() -> {
@@ -84,17 +102,19 @@ public Future<Boolean> deleteTask(String key, boolean logOrNot) {
         }
 
         try {
-            String deleted = kvStore.remove(key);
+            ByteBuffer keyBuffer = ByteBuffer.wrap(key.getBytes(StandardCharsets.UTF_8));
+            byte[] deleted = kvStore.remove(keyBuffer);
+
             if (deleted == null) {
                 System.out.println("[INFO] Key not found for DELETE: " + key);
                 return false;
             }
 
             if (logOrNot) {
-                bufferWriter.write("DELETE " + key);
-                bufferWriter.newLine();
-                bufferWriter.flush();
-                System.out.println("[INFO] DELETE logged: " + key);
+                writer.write("DELETE " + key);
+                writer.newLine();
+                writer.flush();
+                fos.getFD().sync(); 
             }
             return true;
 
@@ -122,13 +142,17 @@ public Future<Boolean> deleteTask(String key, boolean logOrNot) {
         if (!threadPool.awaitTermination(5, TimeUnit.SECONDS)) {
             threadPool.shutdownNow();
         }
-    } catch (InterruptedException e) {
+    }catch (InterruptedException e) {
         threadPool.shutdownNow(); 
         Thread.currentThread().interrupt();
     }
 
-    System.out.println("Shutting down gracefully😊...");
+    System.out.println("Shutting down gracefully :]...");
+    }
 
+    
+    public void replayLogs(){
+        LogReplayer.replayLogs(this);
     }
 
     public void getAllKV(){
@@ -137,8 +161,14 @@ public Future<Boolean> deleteTask(String key, boolean logOrNot) {
             System.out.println("KV is empty");
             return;
         }
-        for (Map.Entry<String, String> entry : kvStore.entrySet()) {
-        System.out.println("Key: " + entry.getKey() + ", Value: " + entry.getValue());
+        for (Map.Entry<ByteBuffer, byte[]> entry : kvStore.entrySet()) {
+            ByteBuffer keyBuffer = entry.getKey();
+            byte[] valueBytes = entry.getValue();
+
+            String keyStr = new String(keyBuffer.array(), StandardCharsets.UTF_8);
+            String valStr = new String(valueBytes, StandardCharsets.UTF_8);
+
+            System.out.println(keyStr + " → " + valStr);
         }
     }
 

@@ -77,7 +77,7 @@ public class Main{
     System.out.println("[INFO] Log replay completed.");
     return true;
 
-}
+}   
 
     public static void basicTest(KeyValue masterNode) {
     List<Future<Boolean>> tasks = new ArrayList<>();
