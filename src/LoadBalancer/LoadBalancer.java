@@ -10,7 +10,6 @@ import java.net.*;
 import java.util.ArrayList;
 import java.util.List;
 import src.hashing.*;
-import src.log.Log;
 
 class Pinger implements Runnable{
 
@@ -25,7 +24,6 @@ Pinger(List<String> servers, ConsistentHashing HashRing){
 
 @Override
 public void run(){
-
     while(true){
         for(String server: new ArrayList<>(nodes)){
             try{
@@ -87,7 +85,7 @@ public class LoadBalancer{
 
     private void buildHashRing(){
 
-        Log.info("Starting Hash ring....");
+        System.out.println("Starting Hash ring....");
 
         for(String server: nodes){
             hashRing.addNode(new Node(server));
