@@ -1,4 +1,4 @@
-package src.hashing;
+package hashing;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;

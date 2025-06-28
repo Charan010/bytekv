@@ -1,4 +1,4 @@
-package src.hashing;
+package hashing;
 
 public class Node{
 

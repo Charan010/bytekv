@@ -1,4 +1,4 @@
-package src.LoadBalancer;
+package LoadBalancer;
 
 import static spark.Spark.*;
 import com.google.gson.*;
@@ -9,7 +9,7 @@ import java.io.OutputStream;
 import java.net.*;
 import java.util.ArrayList;
 import java.util.List;
-import src.hashing.*;
+import hashing.*;
 
 class Pinger implements Runnable{
 

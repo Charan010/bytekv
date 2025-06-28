@@ -1,21 +1,22 @@
-package src.dev.meshkv;
+package dev.meshkv;
 
 import java.io.Serializable;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 
-public class LogEntry implements Serializable{
+class LogEntry implements Serializable{
     private final Operation operation;
     private final String key;
     private final String value;
     private final long timeStamp;
     private final long number;
+    private final String delimiterFormat = "::|::";
 
-    public enum Operation{
+    public static enum Operation{
         PUT, UPDATE, DELETE
     }
 
-    private static volatile long serialNumber = 1;
+    private static volatile long serialNumber = 0;
 
     private synchronized static long getNextSerialNumber(){
         return ++serialNumber;
@@ -35,9 +36,9 @@ public class LogEntry implements Serializable{
 
     public byte[] toBytes(){
         StringBuilder sb = new StringBuilder();
-        sb.append(this.number).append("|").append(this.timeStamp).append("|")
-        .append(this.operation.name()).append("|").append(this.key.length()).append("|")
-        .append(this.key).append("|");
+        sb.append(this.number).append(delimiterFormat).append(this.timeStamp).append(delimiterFormat)
+        .append(this.operation.name()).append(delimiterFormat).append(this.key.length()).append(delimiterFormat)
+        .append(this.key).append(delimiterFormat);
 
         if(value == null)
             sb.append("0");

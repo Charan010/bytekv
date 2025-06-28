@@ -1,4 +1,4 @@
-package src.dev.meshkv;
+package dev.meshkv;
 
 //to-do: need to change parsing of data in the WAL file to replay
 

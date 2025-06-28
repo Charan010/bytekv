@@ -1,4 +1,4 @@
-package src.dev.meshkv;
+package dev.meshkv;
 
 /* this "engine" could be thrown into a .jar file or container so servers can use it */
 import java.util.Map;
@@ -10,7 +10,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
 class KeyValue{
-
     //changing from String to bytes[] for performance as String is bloated
     private final ConcurrentHashMap<String, byte[]> kvStore;
     private final ExecutorService threadPool;
@@ -24,14 +23,12 @@ class KeyValue{
     public KeyValue(ConcurrentHashMap<String, byte[]> hm, int threadPoolSize) {
         this.kvStore = hm;
         this.tpSize = threadPoolSize;
-
         try{
-        this.fos = new FileOutputStream("src/log/master.log", true);
+            setupFOS();
+        }catch(IOException e){
+            System.out.println(e.getMessage());
         }
-        catch(FileNotFoundException error){
-            System.out.println("Error:" + error.getMessage());
-        }
-
+        
         //can hold x threads in a queue when threadpool is exhausted.
         BlockingQueue<Runnable> taskQueue = new ArrayBlockingQueue<>(this.tpSize);
 
@@ -55,6 +52,16 @@ class KeyValue{
         });
     }
 
+    private void setupFOS() throws IOException{
+        try{
+        fos = new FileOutputStream("log/master.log", true);
+
+        }
+        catch(FileNotFoundException error){
+            throw new IOException("FOS file not found Error:" + error.getMessage());
+        }
+    }
+
     //writes to WAL with specific format
     private void writeToLog(LogEntry entry) throws IOException{
         if(fos == null){
@@ -72,7 +79,7 @@ class KeyValue{
 
   public Future<Boolean> addTask(String key ,String value, boolean shouldLog){
     return threadPool.submit(() -> {
-        byte[] valueinBytes = key.getBytes(StandardCharsets.UTF_8);
+        byte[] valueinBytes = value.getBytes(StandardCharsets.UTF_8);
 
         if(!shouldLog){
             kvStore.put(key, valueinBytes);
@@ -147,16 +154,11 @@ public Future<Boolean> deleteTask(String key, boolean shouldLog) {
     }
     
     public void getAllKV(){
-        if(kvStore.isEmpty()){
-            System.out.println("KV is empty");
-            return;
-        }
-        for (Map.Entry<String, byte[]> entry : kvStore.entrySet()) {
-            String key = entry.getKey();
-            byte[] valueBytes = entry.getValue();
+        System.out.println("\n--- Current Key-Value Store ---");
 
-            String valStr = new String(valueBytes, StandardCharsets.UTF_8);
-            System.out.println(key + " → " + valStr);
+        for(Map.Entry<String,byte[]> entry :  kvStore.entrySet()){
+            String value = new String(entry.getValue(), StandardCharsets.UTF_8);
+            System.out.println(entry.getKey() + " -> " + value);
         }
     }
 
