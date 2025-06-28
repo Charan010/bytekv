@@ -1,5 +1,7 @@
 package src.dev.meshkv;
 
+//to-do: need to change parsing of data in the WAL file to replay
+
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
