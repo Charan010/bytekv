@@ -11,7 +11,7 @@ public class Main {
         KeyValue keyValue = new KeyValue(hm, threadPoolSize);
 
         //replay from log file on startup
-        LogReplayer.replayLogs(keyValue);
+        keyValue.replayLogs();
 
         LogJanitor logJanitor = new LogJanitor("src/dev/meshkv/log/master.log");
         Thread janitor = new Thread(logJanitor);

@@ -103,7 +103,7 @@ public class LogJanitor implements Runnable {
 
         try {
             Files.write(tempPath, compactedLines);
-            Files.move(tempPath, originalPath, StandardCopyOption.REPLACE_EXISTING); // ✅ swap
+            Files.move(tempPath, originalPath, StandardCopyOption.REPLACE_EXISTING);
             System.out.println("[INFO] Log compaction successful!");
         } catch (IOException e) {
             System.err.println("[ERROR] Failed to write or move compacted log: " + e.getMessage());
