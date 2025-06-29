@@ -3,7 +3,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
@@ -63,14 +62,9 @@ public class Main{
         ConcurrentHashMap<String,byte[]> hm = new ConcurrentHashMap<>();
 
         KeyValue keyValue = new KeyValue(hm ,threadPoolSize);
+        LogCompact logCompact = new LogCompact("log","log/master.log");
 
-        try{
-            Main.replayLogs(keyValue, "log/master.log");
-        }catch(IOException error){
-            System.out.println(error.getMessage());
-        }
-
-        keyValue.getAllKV();
+        logCompact.compactLog();
         
     }
 }

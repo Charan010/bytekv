@@ -13,10 +13,14 @@ class LogEntry implements Serializable{
     private final String delimiterFormat = "::|::";
 
     public static enum Operation{
-        PUT, UPDATE, DELETE
+        PUT, DELETE
     }
 
     private static volatile long serialNumber = 0;
+
+    public static long returnSerialNumber(){
+        return serialNumber;
+    }
 
     private synchronized static long getNextSerialNumber(){
         return ++serialNumber;

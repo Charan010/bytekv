@@ -149,10 +149,6 @@ public Future<Boolean> deleteTask(String key, boolean shouldLog) {
 
     }
 
-    public void replayLogs(){
-        LogReplayer.replayLogs(this);
-    }
-    
     public void getAllKV(){
         System.out.println("\n--- Current Key-Value Store ---");
 
