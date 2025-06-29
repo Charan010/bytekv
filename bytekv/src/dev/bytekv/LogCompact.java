@@ -1,4 +1,4 @@
-package dev.meshkv;
+package dev.bytekv;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -33,7 +33,7 @@ class LogFilter{
     }
 }
 
-class LogCompact{
+public class LogCompact implements Runnable{
     private static String logPath;
     private static String logFilePath;
 
@@ -42,6 +42,16 @@ class LogCompact{
         logFilePath = LogFilePath;
     }
 
+        @Override
+        public void run(){
+            System.out.println("------ Starting Background log compaction ------");
+            while(true){
+                compactLog();
+                try{ Thread.sleep(6000);}
+                catch(InterruptedException e){ System.out.println("Daemon thread interrupt:" + e.getMessage());}
+            }            
+        }
+
     private List<String> returnAllLogs() throws IOException {
         try {
             return Files.readAllLines(Paths.get(logFilePath));
@@ -49,7 +59,7 @@ class LogCompact{
             throw new IOException("Log file path error: " + e.getMessage());
         }
     }
-
+    
     public void compactLog(){
         List<String> allLogs;
 
@@ -59,7 +69,6 @@ class LogCompact{
             System.out.println(e.getMessage());
             return;
         }
-
         System.out.println("---- Starting Log compaction -----");
 
         Map<String,Integer> lastestOps = new HashMap<>();

@@ -1,6 +1,5 @@
-package dev.meshkv;
+package dev.bytekv;
 
-/* this "engine" could be thrown into a .jar file or container so servers can use it */
 import java.util.Map;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantLock;
@@ -8,8 +7,9 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.io.File;
 
-class KeyValue{
+public class KeyValue implements KVStore{
     //changing from String to bytes[] for performance as String is bloated
     private final ConcurrentHashMap<String, byte[]> kvStore;
     private final ExecutorService threadPool;
@@ -17,20 +17,28 @@ class KeyValue{
     private final BlockingQueue<Runnable> deadLetterQueue = new LinkedBlockingDeque<>();
     private final ReentrantLock logLock = new ReentrantLock();
     private final int tpSize;
+    private final String logFilePath;
+    private final String logPath;
+    private final int blockingQueueSize;
 
     FileOutputStream fos; 
 
-    public KeyValue(ConcurrentHashMap<String, byte[]> hm, int threadPoolSize) {
-        this.kvStore = hm;
+
+    public KeyValue(int threadPoolSize,int BlockingQueueSize ,String logFilePath, String logPath) {
+        this.kvStore = new ConcurrentHashMap<>();
         this.tpSize = threadPoolSize;
+        this.logFilePath = logFilePath;
+        this.logPath = logPath;
+        this.blockingQueueSize = BlockingQueueSize;
+    
         try{
             setupFOS();
         }catch(IOException e){
-            System.out.println(e.getMessage());
+            System.out.println("FOS ERROR :/ " + e.getMessage());
         }
         
         //can hold x threads in a queue when threadpool is exhausted.
-        BlockingQueue<Runnable> taskQueue = new ArrayBlockingQueue<>(this.tpSize);
+        BlockingQueue<Runnable> taskQueue = new ArrayBlockingQueue<>(this.blockingQueueSize);
 
         this.threadPool = new ThreadPoolExecutor(
             threadPoolSize,
@@ -39,6 +47,66 @@ class KeyValue{
             taskQueue,
             Executors.defaultThreadFactory()
         );
+    }
+
+       // Interface Methods
+    @Override
+    public void put(String key, String value) {
+        addTask(key, value, true);
+    }
+
+    @Override
+    public String get(String key) {
+        try {
+            return getTask(key).get(1, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    @Override
+    public void delete(String key) {
+        try {
+            deleteTask(key, true).get(1, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            System.out.println("Delete failed: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public void shutDown() {
+        threadPool.shutdown();
+
+        try {
+            if (!threadPool.awaitTermination(5, TimeUnit.SECONDS)) {
+                threadPool.shutdownNow();
+            }
+            if (fos != null) fos.close();
+        } catch (InterruptedException e) {
+            threadPool.shutdownNow();
+            Thread.currentThread().interrupt();
+        } catch (IOException e) {
+            System.out.println("Failed to close WAL: " + e.getMessage());
+        }
+
+        System.out.println("Shutting down MeshKV...");
+    }
+
+    @Override
+    public void getAll() {
+        System.out.println("\n--- Current Key-Value Store ---");
+        for (Map.Entry<String, byte[]> entry : kvStore.entrySet()) {
+            String value = new String(entry.getValue(), StandardCharsets.UTF_8);
+            System.out.println(entry.getKey() + " -> " + value);
+        }
+    }
+
+    @Override
+    public void addCompactLogging() {
+        Thread thread = new Thread(new LogCompact(this.logFilePath, this.logPath));
+        thread.setDaemon(true);
+        thread.setName("LogCompactor");
+        thread.start();
     }
 
     public Future<String> getTask(String key){
@@ -53,13 +121,9 @@ class KeyValue{
     }
 
     private void setupFOS() throws IOException{
-        try{
-        fos = new FileOutputStream("log/master.log", true);
+        File logFile = new File(this.logFilePath);
 
-        }
-        catch(FileNotFoundException error){
-            throw new IOException("FOS file not found Error:" + error.getMessage());
-        }
+        fos = new FileOutputStream(logFile, true);
     }
 
     //writes to WAL with specific format
@@ -95,7 +159,7 @@ class KeyValue{
             return true;
 
         }catch(IOException e){
-            System.out.println("Failed to log entry for key: " + key + "error:" + e.getMessage());
+            System.out.println("Failed to log entry for key: " + key + " error:" + e.getMessage());
             return false;
         }
         finally{
@@ -128,7 +192,7 @@ public Future<Boolean> deleteTask(String key, boolean shouldLog) {
         return deadLetterQueue.size();
     }
 
-    public void shutdown() throws IOException {
+    public void shutdown(){
         threadPool.shutdown();
 
         try {
@@ -142,13 +206,13 @@ public Future<Boolean> deleteTask(String key, boolean shouldLog) {
             Thread.currentThread().interrupt();
 
         }catch(IOException e){
-            throw new IOException("Failed to close fos stream:" + e.getMessage());
+            System.out.println("Failed to close fos stream:" + e.getMessage());
         }
 
         System.out.println("Shutting down gracefully :]...");
 
     }
-
+    
     public void getAllKV(){
         System.out.println("\n--- Current Key-Value Store ---");
 
