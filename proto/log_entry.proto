@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package dev.bytekv.proto;
+
+message LogEntry {
+  int64 serialNum = 1;
+  int64 timestamp = 2;
+  string operation = 3;
+  string key = 4;
+  string value = 5;
+  bool isTTL = 6;
+  int64 expiryTime = 7;
+}
