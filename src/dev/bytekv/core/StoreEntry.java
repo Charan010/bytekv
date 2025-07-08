@@ -14,4 +14,18 @@ public class StoreEntry{
         this.TTL = TTL;
         this.expiryTime = expiryTime;
     }
+
+    @Override
+    public boolean equals(Object o) {
+    if (this == o) return true;
+        if (!(o instanceof StoreEntry)) return false;
+        StoreEntry that = (StoreEntry) o;
+        return key.equals(that.key);
+    }
+
+    @Override
+    public int hashCode() {
+        return key.hashCode();
+    }
+
 }

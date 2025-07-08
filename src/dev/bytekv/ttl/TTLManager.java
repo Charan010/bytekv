@@ -1,12 +1,14 @@
 package dev.bytekv.ttl;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+
 
 import dev.bytekv.core.*;
 
@@ -39,27 +41,27 @@ public class TTLManager implements Runnable{
 
         for(int i = 0; i < Math.min(20, values.size()); ++i){
             StoreEntry se = values.get(rand.nextInt(values.size()));
-            if(se.TTL && System.currentTimeMillis() > se.expiryTime){
-                keyValue.ttlEntries.remove(se);
+            
+            if(se.TTL && System.currentTimeMillis() > se.expiryTime)
                 ++expiredCount;
-            }
+            
         }
         if(expiredCount >= Math.max(5, values.size() / 4)){
             System.out.println("----- Found 5+ expired TTL entries. running full scan -----");
             ttlChecker();
         }
-        },0 ,5, TimeUnit.SECONDS);
+
+        },0 ,10, TimeUnit.SECONDS);
     }
 
-    private void ttlChecker(){
-        this.values = new ArrayList<>(keyValue.ttlEntries);
+    private void ttlChecker() {
 
-        for(int i = 0 ; i < values.size(); ++i){
-            StoreEntry se = values.get(i);
-            if(se.TTL && System.currentTimeMillis() > se.expiryTime){
-                    keyValue.ttlEntries.remove(se);
-            }
-        }
+    Iterator<StoreEntry> it = keyValue.ttlEntries.iterator();
+
+    while (it.hasNext()) {
+        StoreEntry se = it.next();
+        if (se.TTL && System.currentTimeMillis() >= se.expiryTime) 
+            it.remove();
     }
-
+    }
 }

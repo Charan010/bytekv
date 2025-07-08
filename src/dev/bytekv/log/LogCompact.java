@@ -1,131 +1,90 @@
 package dev.bytekv.log;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
+/*
+    Logging of every key&value is fine. but it would be clunky and lot of logs when we are dealing with lot of values
+    so. compaction would be triggered when log reaches 1000 records and removes duplicates .
+
+    this "1000" can be adjusted in MAX_ENTRIES
+
+ */
+
+
+import dev.bytekv.proto.LogEntryOuterClass;
+
+import java.io.*;
+import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.Pattern;
 
+public class LogCompact implements Runnable {
 
-class LogFilter{
-    String id;
-    String timestamp;
-    String line;
-    String operation;
-    String key;
-    String value;
+    private final String logFilePath;
+    private final String logDir;
+    private static final long MAX_ENTRIES = 1000;
 
-    private static final String delimiterFormat = "::|::";
-
-    public LogFilter(String line){
-        String[] args = line.split(Pattern.quote(delimiterFormat), -1);
-
-        if (args.length < 6) {
-            throw new IllegalArgumentException(line);
-        }
-        this.id = args[0];
-        this.timestamp = args[1];
-        this.operation = args[2].trim();
-        this.key = args[3].trim();
-        this.value = args[5];
-    }
-}
-
-public class LogCompact implements Runnable{
-    private static String logPath;
-    private static String logFilePath;
-    private static long MAX_ENTRIES = 1000;
-
-    public LogCompact(String LogPath, String LogFilePath) {
-        logPath = LogPath;
-        logFilePath = LogFilePath;
+    public LogCompact(String logFilePath, String logDir) {
+        this.logFilePath = logFilePath;
+        this.logDir = logDir;
     }
 
-        @Override
-        public void run(){
-            ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-            System.out.println("----- Starting log compaction background thread -----");
+    public void run() {
+        System.out.println("🧹 [LogCompactor] Starting background log compaction scheduler...");
 
-            scheduler.scheduleAtFixedRate(() -> {
-                long entries = LogEntry.returnSerialNumber();
-                if(entries > MAX_ENTRIES)
-                    compactLog();
-                
-            }, 0, 5, TimeUnit.MINUTES);
-        }
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
-        
-        private List<String> returnAllLogs() throws IOException {
+        scheduler.scheduleAtFixedRate(() -> {
             try {
-                return Files.readAllLines(Paths.get(logFilePath));
-            } catch (IOException e) {
-                throw new IOException("Log file path error: " + e.getMessage());
+                long currentEntries = LogEntry.returnSerialNumber();
+                if (currentEntries > MAX_ENTRIES) {
+                    compactLog();
+                }
+            } catch (Exception e) {
+                System.out.println("[LogCompactor] Error during scheduled compaction: " + e.getMessage());
             }
+        }, 0, 5, TimeUnit.MINUTES);
+    }
+
+
+    public void compactLog() {
+        Map<String, LogEntryOuterClass.LogEntry> latestOps = new HashMap<>();
+
+        try (FileInputStream fis = new FileInputStream(logFilePath)) {
+            while (true) {
+                LogEntryOuterClass.LogEntry entry = LogEntryOuterClass.LogEntry.parseDelimitedFrom(fis);
+                if (entry == null) break;
+
+                String key = entry.getKey();
+                String op = entry.getOperation();
+
+                if (op.equals("DELETE")) {
+                    latestOps.remove(key); 
+                } else {
+                    latestOps.put(key, entry);
+                }
+            }
+        } catch (IOException e) {
+            System.out.println("[LogCompactor] Failed to read log: " + e.getMessage());
+            return;
         }
-    
-        public void compactLog(){
-            List<String> allLogs;
 
-            try{
-                allLogs = returnAllLogs();
-            }catch(IOException e){
-                System.out.println(e.getMessage());
-                return;
+        Path compactedPath = Paths.get(logDir, "compacted.log");
+        try (FileOutputStream fos = new FileOutputStream(compactedPath.toFile())) {
+            for (LogEntryOuterClass.LogEntry entry : latestOps.values()) {
+                entry.writeDelimitedTo(fos);
             }
-            System.out.println("---- Starting Log compaction -----");
-
-
-            /* Map to store latest indices of each key and value 
-            as we only care about lastest updated version of k&v
-
-            */
-            Map<String,Integer> lastestOps = new HashMap<>();
-            Set<String> deletedKeys = new HashSet<>();
-
-            for(int i = 0 ; i < allLogs.size(); ++i){
-                String log = allLogs.get(i);
-                LogFilter lf = null;
-        
-                try{
-                    lf = new LogFilter(log);
-                }catch(IllegalArgumentException e){
-                    System.out.println("Bad structure log :/ " + e.getMessage());
-                }
-                if(lf.operation.equals("DELETE")){
-                    lastestOps.remove(lf.key);
-                    deletedKeys.add(lf.key);
-                }else if(lf.operation.equals("PUT")){
-                    lastestOps.put(lf.key, i);
-                    deletedKeys.remove(lf.key);
-                }
-            }
-
-            List<String> compactedLog = new ArrayList<>();
-            Set<Integer> indicesToKeep = new HashSet<>(lastestOps.values());
-
-            for (int i = 0; i < allLogs.size(); i++) {
-                if (indicesToKeep.contains(i)) {
-                    compactedLog.add(allLogs.get(i));
-                }
-            }
-        
-
-            Path compactedPath = Paths.get(logPath + "/compacted.log"); 
-            Path originalPath = Paths.get(logFilePath);
-
-            try{
-                Files.write(compactedPath, compactedLog);
-                Files.move(compactedPath, originalPath, StandardCopyOption.REPLACE_EXISTING);
-                Files.deleteIfExists(compactedPath);
-                System.out.println("---- Log compaction is succesful -----");
-        
-            }catch(IOException error){
-                System.out.println("[error] failed to write compacted log " + error.getMessage());
-            }
+        } catch (IOException e) {
+            System.out.println("[LogCompactor] Failed to write compacted log: " + e.getMessage());
+            return;
         }
+
+        // Replace original log with compacted one
+        try {
+            Files.move(compactedPath, Paths.get(logFilePath), StandardCopyOption.REPLACE_EXISTING);
+            System.out.println("[LogCompactor] Log compaction successful.");
+        } catch (IOException e) {
+            System.out.println("[LogCompactor] Failed to replace original log: " + e.getMessage());
+        }
+    }
 }

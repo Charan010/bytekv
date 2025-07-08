@@ -3,20 +3,22 @@ package dev.bytekv.core;
 import java.util.concurrent.Future;
 
 public interface KVStore {
-    Future<Boolean> put(String key, String value);
-    Future<Boolean> put(String key, String value, long expiryTime);
+    Future<String> put(String key, String value);
+    Future<String> put(String key, String value, long expiryTime);
     Future<String> get(String key);
-    Future<Boolean> delete(String key);
-    Future<Boolean> delete(String key, long expiryTime);
+    Future<String> delete(String key);
+    Future<String> delete(String key, long expiryTime);
     void shutDown();
     void compactLogging(boolean flag);
+    void logging(boolean flag);
     void replayLogs();
+    void getAllKV();
 
     static KVStore create(int threadPool, int queueSize, String logFilePath, String logPath) {
         return new KeyValue(threadPool, queueSize, logFilePath, logPath);
     }
 
-    enum Time {
+    enum ETIME {
         SECONDS(1000),
         MINUTES(60 * 1000),
         HOURS(60 * 60 * 1000),
@@ -24,7 +26,7 @@ public interface KVStore {
 
         private final long millis;
 
-        Time(long millis) {
+        ETIME(long millis) {
             this.millis = millis;
         }
 

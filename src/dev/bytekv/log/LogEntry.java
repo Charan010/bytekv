@@ -6,7 +6,7 @@ import java.time.Instant;
 import dev.bytekv.proto.LogEntryOuterClass;
 
 
-public class LogEntry implements Serializable {
+public class LogEntry implements Serializable{
     private final Operation operation;
     private final String key;
     private final String value;

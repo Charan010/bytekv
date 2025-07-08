@@ -14,6 +14,10 @@ public class LogRestorer{
     }
 
     public void replayLogs() {
+
+        System.out.println("Triggered replaying log :P");
+
+        
         String logFilepath = keyValue.logFilePath;
 
         try (FileInputStream fis = new FileInputStream(logFilepath)) {
@@ -28,6 +32,8 @@ public class LogRestorer{
             String operation = entry.getOperation();
             boolean isTTL = entry.getIsTTL();
             long expiryTime = entry.getExpiryTime();
+
+            System.out.println("key:"+key + " value:" +value + " operation:"+operation + "isTTL:" + isTTL);
 
             if (!isTTL) {
                 if (operation.equals("PUT"))
