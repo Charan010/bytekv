@@ -48,7 +48,7 @@ public class LogRestorer{
                 
                 else {
                     if (operation.equals("PUT"))
-                        keyValue.put(key, value);
+                        keyValue.put(key, value, expiryTime);
                 }
             }
         }

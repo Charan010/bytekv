@@ -9,6 +9,8 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
+import java.util.concurrent.CountDownLatch;
+
 
 import dev.bytekv.core.*;
 
@@ -22,9 +24,16 @@ import dev.bytekv.core.*;
 public class TTLManager implements Runnable{
     private KeyValue keyValue;
     List<StoreEntry> values;
+    private volatile boolean running = true;
+    private CountDownLatch shutdownLatch;
 
-    public TTLManager(KeyValue keyValue){
+    public TTLManager(KeyValue keyValue, CountDownLatch shutdownLatch){
         this.keyValue = keyValue;
+        this.shutdownLatch = shutdownLatch;
+    }
+
+    public void stopIt(){
+        running = false;
     }
 
     @Override
@@ -32,6 +41,11 @@ public class TTLManager implements Runnable{
         ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
         scheduler.scheduleAtFixedRate(() ->{
+
+        if(!running){
+            shutdownLatch.countDown();
+            return;
+        }
 
         int expiredCount = 0;
 

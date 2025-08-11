@@ -1,8 +1,9 @@
 #!/bin/bash
+
 mkdir -p out
 
-javac -cp "lib/protobuf-java-3.25.3.jar:." \
-  -d out \
-  $(find src -name "*.java") &&
+CP="lib/*:."
 
-java -cp "out:lib/protobuf-java-3.25.3.jar" dev.bytekv.Main
+javac -cp "$CP" -d out $(find src -name "*.java") &&
+
+java -cp "out:$CP" dev.bytekv.Main

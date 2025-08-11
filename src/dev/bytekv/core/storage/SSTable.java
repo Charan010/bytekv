@@ -1,4 +1,4 @@
-package dev.bytekv.core;
+package dev.bytekv.core.storage;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -13,7 +13,6 @@ import java.nio.file.Files;
     so we dont need to search through files each time to "get".
 
  */
-
 
 public class SSTable {
     public Map<String, Long> indexMap;
@@ -32,16 +31,19 @@ public class SSTable {
 
     
     public SSTable(int sstNumber) throws IOException {
+        this.bloomFilter = new BloomFilter(10000);
         this.padded = String.format("%03d", sstNumber);
         this.dirName = "SST/sstable-" + padded;
-        new File(dirName).mkdir();
 
+        new File(dirName).mkdir();
+            
         this.indexMap = new HashMap<>();
         this.indexFile = "sstable-" + padded + ".index";
         this.dataFile = "sstable-" + padded + ".data";
 
         String indexPath = Paths.get(dirName, this.indexFile).toString();
         String dataPath = Paths.get(dirName, this.dataFile).toString();
+
 
         new File(indexPath).createNewFile();
         new File(dataPath).createNewFile();

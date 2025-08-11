@@ -17,27 +17,47 @@ import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CountDownLatch;
+
+import dev.bytekv.core.KeyValue;
 
 public class LogCompact implements Runnable {
 
     private final String logFilePath;
     private final String logDir;
     private static final long MAX_ENTRIES = 1000;
+    private volatile boolean running = true;
+    private CountDownLatch shutdownLatch;
 
-    public LogCompact(String logFilePath, String logDir) {
+    private KeyValue kv;
+
+    public LogCompact(String logFilePath, String logDir,CountDownLatch latch, KeyValue kv) {
         this.logFilePath = logFilePath;
         this.logDir = logDir;
+        this.kv = kv;
+        this.shutdownLatch = shutdownLatch;
     }
 
+    public void stopIt(){
+        running = false;
+    }   
+
     public void run() {
-        System.out.println("🧹 [LogCompactor] Starting background log compaction scheduler...");
+        System.out.println("[LogCompactor] Starting background log compaction scheduler...");
 
         ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
         scheduler.scheduleAtFixedRate(() -> {
+
+            if(!running){
+                shutdownLatch.countDown();
+                return;
+            }
+
             try {
                 long currentEntries = LogEntry.returnSerialNumber();
                 if (currentEntries > MAX_ENTRIES) {
+                    kv.backPressureOn = true;
                     compactLog();
                 }
             } catch (Exception e) {
@@ -48,6 +68,7 @@ public class LogCompact implements Runnable {
 
 
     public void compactLog() {
+
         Map<String, LogEntryOuterClass.LogEntry> latestOps = new HashMap<>();
 
         try (FileInputStream fis = new FileInputStream(logFilePath)) {
@@ -85,6 +106,10 @@ public class LogCompact implements Runnable {
             System.out.println("[LogCompactor] Log compaction successful.");
         } catch (IOException e) {
             System.out.println("[LogCompactor] Failed to replace original log: " + e.getMessage());
+        }
+        
+        finally{
+            kv.backPressureOn = false;
         }
     }
 }
