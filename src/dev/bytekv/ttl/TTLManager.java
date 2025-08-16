@@ -26,6 +26,7 @@ public class TTLManager implements Runnable{
     List<StoreEntry> values;
     private volatile boolean running = true;
     private CountDownLatch shutdownLatch;
+    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
     public TTLManager(KeyValue keyValue, CountDownLatch shutdownLatch){
         this.keyValue = keyValue;
@@ -34,12 +35,11 @@ public class TTLManager implements Runnable{
 
     public void stopIt(){
         running = false;
+        scheduler.shutdown();
     }
 
     @Override
     public void run(){
-        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-
         scheduler.scheduleAtFixedRate(() ->{
 
         if(!running){

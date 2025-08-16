@@ -10,15 +10,15 @@ public interface KVStore {
     Future<String> delete(String key);
     Future<String> delete(String key, long expiryTime);
     
+
     void shutDown();
     void compactLogging(boolean flag);
     void logging(boolean flag);
     void replayLogs();
     void flush();
 
-
     static KVStore createDB(){
-        return new KeyValue(100 ,100 , "logs/master.log", "logs");
+        return new KeyValue(100 ,500 , "logs/master.log", "logs");
 
     }
     

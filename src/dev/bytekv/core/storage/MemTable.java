@@ -27,36 +27,45 @@ public class MemTable {
         this.flushThreshold = flushThreshold;
     }
 
-    public synchronized void put(String key, String value) throws IOException {
-        buffer.put(key, value);
-        if (buffer.size() >= flushThreshold)
-            flush();
+    public void put(String key, String value) throws IOException {
+            buffer.put(key, value);
+            if (buffer.size() >= flushThreshold)
+                flush();
     }
 
-    public synchronized String delete(String key) throws IOException {
-        if (!buffer.containsKey(key))
-            return "NO KEY FOUND";
+    public String delete(String key) throws IOException {
 
-        buffer.put(key, TOMBSTONE);
-        if (buffer.size() >= flushThreshold)
-            flush();
-        return "OK!";
+            if (!buffer.containsKey(key))
+                return "NO KEY FOUND";
+
+            buffer.put(key, TOMBSTONE);
+            if (buffer.size() >= flushThreshold)
+                flush();
+
+            return "OK!";
     }
 
-    public synchronized String get(String key) throws IOException {
+    public String get(String key) throws IOException {
         String val = buffer.get(key);
-        if (TOMBSTONE.equals(val)) return null;
-        if (val != null) return val;
+        if (TOMBSTONE.equals(val)) 
+            return null;
+        if (val != null) 
+            return val;
 
-        for (SSTable table : sstManager.getSSTables()) {
+        for (SSTable table : sstManager.getAllSSTables()) {
             val = table.get(key);
-            if (TOMBSTONE.equals(val)) return null;
-            if (val != null) return val;
+            if (TOMBSTONE.equals(val)) 
+                return null;
+            if (val != null) 
+                return val;
         }
+
         return null;
+
     }
 
-    public synchronized void flush() throws IOException {
+
+    public void flush() throws IOException {
         TreeMap<String, String> snapshot = new TreeMap<>(buffer);
         buffer.clear();
         sstManager.flushToSSTable(snapshot);

@@ -8,7 +8,6 @@ package dev.bytekv.log;
 
  */
 
-
 import dev.bytekv.proto.LogEntryOuterClass;
 
 import java.io.*;

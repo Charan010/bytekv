@@ -37,7 +37,7 @@ public class KeyValue implements KVStore{
     private final String logPath;
     private final int blockingQueueSize;
 
-    private boolean logging = false;
+    private boolean logging;
     private boolean compactLogging = false;
     private Thread comThread;
     Thread ttlManagerThread;
@@ -59,9 +59,8 @@ public class KeyValue implements KVStore{
     private TTLManager ttlManager;
     private LogCompact logCompact;
 
-    FileOutputStream fos;
-    private final Queue<LogEntryOuterClass.LogEntry> pendingWrites = new ConcurrentLinkedQueue<>();
-    private static final int MAX_PENDING_WRITES = 5;
+    private WALWriter writer;
+
 
     public KeyValue(int threadPoolSize,int BlockingQueueSize ,String logFilePath, String logPath)
      {
@@ -71,13 +70,21 @@ public class KeyValue implements KVStore{
         ttlEntries = Collections.newSetFromMap(new ConcurrentHashMap<>());
         sstManager = new SSTManager();
         memTable = new MemTable(this.sstManager);
-        lruCache = new LRUCache(30);
+        lruCache = new LRUCache(5000);
 
+        
         //publishersList = new HashMap<>();
 
         backPressureOn = false;
 
         logCompact = new LogCompact(this.logFilePath, this.logPath, shutdownLatch, this);
+        
+        try {
+            writer = new WALWriter(this.logFilePath);
+
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to initialize WAL", e);
+        }
 
         /*
          running a background thread which would randomly take 20 kv pairs and check for ttl expiration.
@@ -88,37 +95,40 @@ public class KeyValue implements KVStore{
 
          */
 
-        merger = new Merger(this.sstManager, shutdownLatch);
         ttlManager = new TTLManager(this, shutdownLatch);
-
         ttlManagerThread = new Thread(ttlManager);
         ttlManagerThread.setName("TTLManager thread");
         ttlManagerThread.setDaemon(true);
         ttlManagerThread.start();
 
 
+        /*
+        merger = new Merger(this.sstManager, shutdownLatch);
         this.mergeThread = new Thread(merger);
         this.mergeThread.setName("SSTable Merger");
         this.mergeThread.setDaemon(true);
         this.mergeThread.start();
+        */
         
-        try{
-            setupFOS();
-        }catch(IOException e){
-            System.out.println("FOS ERROR :/ " + e.getMessage());
-        }
-        
+     
         /* it can take up to x amount of tasks/threads when threadpool is out of threads. */
 
         BlockingQueue<Runnable> taskQueue = new ArrayBlockingQueue<>(this.blockingQueueSize);
 
-        this.threadPool = new ThreadPoolExecutor(
+       this.threadPool = new ThreadPoolExecutor(
             threadPoolSize,
             threadPoolSize,
             0L, TimeUnit.MILLISECONDS,
             taskQueue,
-            Executors.defaultThreadFactory()
-         );
+            Executors.defaultThreadFactory(),
+            (r, executor) -> {
+                try {
+                    executor.getQueue().put(r);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        );
     }
 
         @Override
@@ -188,7 +198,6 @@ public class KeyValue implements KVStore{
     @Override
     public void flush(){
         try{
-             flushToDisk();
              memTable.flush();
 
         }catch(IOException e){
@@ -199,8 +208,11 @@ public class KeyValue implements KVStore{
     @Override
     public void shutDown() {
 
-        ttlManager.stopIt();
-        merger.stopIt();
+        if(ttlManager != null)
+            ttlManager.stopIt();
+        
+        //if(merger != null)
+            //merger.stopIt();
 
         if(comThread != null)
             logCompact.stopIt();
@@ -208,10 +220,7 @@ public class KeyValue implements KVStore{
         try{
         shutdownLatch.await();
         memTable.flush();
-        flushToDisk();
-
-        if (fos != null) 
-            fos.close();
+        writer.shutDown();
 
         }catch(Exception e){
             System.out.println(e.getMessage());
@@ -255,82 +264,39 @@ public class KeyValue implements KVStore{
         });
     }
 
-    private void setupFOS() throws IOException{
-        File logFile = new File(this.logFilePath);
-        fos = new FileOutputStream(logFile, true);
-
-    }
 
     /*
         flushing to disk batch wise as it performance would get pretty shit if i do flush to each write 
         as it uses syscalls and dma to write to disk. flushes 10 writes at a time.
 
      */
-    private void flushToDisk() throws IOException {
+   
+    public Future<String> addTask(String key ,String value){
+        return threadPool.submit(() -> {
 
-        if (pendingWrites == null || pendingWrites.isEmpty())
-            return;
-
-        Iterator<LogEntryOuterClass.LogEntry> iterator = pendingWrites.iterator();
-
-        while (iterator.hasNext()) {
-            LogEntryOuterClass.LogEntry entry = iterator.next();
-            try {
-                entry.writeDelimitedTo(fos);
-            } catch (IOException e) {
-                throw new IOException("WAL file error: " + e.getMessage(), e);
+            if(!logging){
+                lruCache.put(key, value);
+                memTable.put(key,value);
+                return "OK!";
             }
-        }
 
-        fos.flush();
+            logLock.lock();
 
-        pendingWrites.clear();
+            try{
+                lruCache.put(key, value);
+                memTable.put(key,value);
+                LogEntry entry = new LogEntry(LogEntry.Operation.PUT, key, value, false, -1);
+                writer.writeToLog(entry.toProto());
+                return "OK!";
+
+            }catch(IOException e){
+                return "ERROR: log file not initialized properly";
+            }
+            finally{
+                logLock.unlock();
+            }
+        });
     }
-
-
-    private void writeToLog(LogEntryOuterClass.LogEntry entry) throws IOException {
-    if (fos == null) {
-        throw new IOException("WAL output stream not initialized.");
-    }
-
-    try {
-        pendingWrites.add(entry);
-
-        if (pendingWrites.size() > MAX_PENDING_WRITES && !this.backPressureOn) {
-            flushToDisk(); // this will clear the list internally
-        }
-
-    } catch (IOException e) {
-        throw new IOException("Failed to write log entry to WAL: " + e.getMessage(), e);
-    }
-}
-
-  public Future<String> addTask(String key ,String value){
-    return threadPool.submit(() -> {
-
-        if(!this.logging){
-            lruCache.put(key, value);
-            memTable.put(key,value);
-            return "OK!";
-        }
-
-        logLock.lock();
-
-        try{
-            lruCache.put(key, value);
-            memTable.put(key,value);
-            LogEntry logEntry = new LogEntry(LogEntry.Operation.PUT, key, value, false, -1);
-            writeToLog(logEntry.toProto());
-            return "OK!";
-
-        }catch(IOException e){
-            return "ERROR: log file not initialized properly";
-        }
-        finally{
-            logLock.unlock();
-        }
-    });
-  }
 
     public Future<String> addTask(String key ,String value, long expiryTime){
        return threadPool.submit(() -> {
@@ -346,7 +312,7 @@ public class KeyValue implements KVStore{
 
         try{
             LogEntry logEntry = new LogEntry(LogEntry.Operation.PUT,key,value, true, expiryTime);
-            writeToLog(logEntry.toProto());
+            writer.writeToLog(logEntry.toProto());
             ttlEntries.add(storeEntry);
             return "OK!";
 
@@ -361,26 +327,26 @@ public class KeyValue implements KVStore{
         });
     }
 
-public Future<String> deleteTask(String key) {
-    return threadPool.submit(() ->{
-        if(!this.logging){
-            return memTable.delete(key);
-        }
-        logLock.lock();
+    public Future<String> deleteTask(String key) {
+        return threadPool.submit(() ->{
+            if(!this.logging){
+                return memTable.delete(key);
+            }
+            logLock.lock();
 
-        try{
-            LogEntry logEntry = new LogEntry(LogEntry.Operation.DELETE, key, false , 0);
-            writeToLog(logEntry.toProto());
-            return "OK!";
+            try{
+                LogEntry logEntry = new LogEntry(LogEntry.Operation.DELETE, key, false , 0);
+                writer.writeToLog(logEntry.toProto());
+                return "OK!";
 
-        }catch(IOException error){
-            return "ERROR: log file not initialized properly";
+            }catch(IOException error){
+                return "ERROR: log file not initialized properly";
 
-        }finally{
+            }finally{
                 logLock.unlock();
-        }
-    });
-}
+            }
+        });
+    }
 
 
     /* overloading deleteTask with delayMs to delay deletes */
@@ -401,7 +367,7 @@ public Future<String> deleteTask(String key) {
 
             try{
                 LogEntry logEntry = new LogEntry(LogEntry.Operation.DELETE, key, true , expiryTime);
-                writeToLog(logEntry.toProto());
+                writer.writeToLog(logEntry.toProto());
                 ttlEntries.add(obj);
                 return "OK!";
 
@@ -413,19 +379,5 @@ public Future<String> deleteTask(String key) {
             }
         });
     }
-
-    /*public String createPublisher(String publisherName){
-        return threadpool.submit(() -> {
-
-            if(publishersList.containKey(publisherName)){
-                return "ALREADY EXISTS!";
-            }
-
-            Publisher publisher = new Publisher(publisherName);
-            publishersList.put(publisherName, publisher);
-
-        });
-    }
-        */
 
 }

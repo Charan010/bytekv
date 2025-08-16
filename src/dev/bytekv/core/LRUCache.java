@@ -3,8 +3,6 @@ package dev.bytekv.core;
 import java.util.*;
 import java.util.concurrent.locks.*;
 
-// cache - 
-
 
 public class LRUCache<K, V> {
     private final LinkedHashMap<K, V> map;

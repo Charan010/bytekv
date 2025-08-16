@@ -28,7 +28,7 @@ public class Merger implements Runnable {
         }
 
         scheduler.scheduleAtFixedRate(() -> {
-            if (sstManager.getSSTCount().get() > 5) {
+            /*if (sstManager.getSSTCount().get() > 5) {
                 System.out.println("Merging SSTables...");
 
             try {
@@ -36,8 +36,10 @@ public class Merger implements Runnable {
             } catch (IOException e) {
                 System.err.println("IO error during SST merge: " + e.getMessage());
             }
-        }
+
+        }  */
         }, 0, 5, TimeUnit.MINUTES);
 }
+/* */ 
 
 }
