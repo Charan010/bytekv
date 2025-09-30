@@ -9,8 +9,11 @@ import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantLock;
 
+import javax.management.RuntimeErrorException;
+
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.io.File;
 
@@ -37,50 +40,53 @@ public class KeyValue implements KVStore{
     private final String logPath;
     private final int blockingQueueSize;
 
-    private boolean logging;
+    private boolean logging = true;
     private boolean compactLogging = false;
     private Thread comThread;
     Thread ttlManagerThread;
     CountDownLatch shutdownLatch = new CountDownLatch(3);
 
-    public boolean backPressureOn = false;
+    public Boolean backPressureOn = false;
 
     //private HashMap<String,Publisher> publishersList;
 
-    private LRUCache<String,String> lruCache;
+    private LRUCache lruCache;
 
-    public Set<StoreEntry> ttlEntries;
+    public ConcurrentHashMap<String, StoreEntry> ttlEntries;
     SSTManager sstManager;
     private MemTable memTable;
 
-    private Thread mergeThread;
-    private Merger merger;
-
     private TTLManager ttlManager;
     private LogCompact logCompact;
-
     private WALWriter writer;
 
+    public int memTableLimit;
+    public int diskFlushLimit;
 
-    public KeyValue(int threadPoolSize,int BlockingQueueSize ,String logFilePath, String logPath)
+
+    public KeyValue(int threadPoolSize,int BlockingQueueSize ,String logFilePath, String logPath, int memTableLimit, int diskFlushLimit) throws IOException
      {
         this.logFilePath = logFilePath;
         this.logPath = logPath;
-        blockingQueueSize = BlockingQueueSize;
-        ttlEntries = Collections.newSetFromMap(new ConcurrentHashMap<>());
-        sstManager = new SSTManager();
-        memTable = new MemTable(this.sstManager);
-        lruCache = new LRUCache(5000);
+        this.blockingQueueSize = BlockingQueueSize;
+        this.diskFlushLimit = diskFlushLimit;
+        this.memTableLimit = memTableLimit;
 
+        ttlEntries = new ConcurrentHashMap<>();        
+        try{sstManager = new SSTManager();}
         
-        //publishersList = new HashMap<>();
+        catch(IOException e){
+            throw new IOException(e);
+        }
 
+        memTable = new MemTable(this.sstManager, memTableLimit);
+        lruCache = new LRUCache(1500);
+        
         backPressureOn = false;
-
-        logCompact = new LogCompact(this.logFilePath, this.logPath, shutdownLatch, this);
+        logCompact = new LogCompact(this.logFilePath, this.logPath, shutdownLatch, this, backPressureOn);
         
         try {
-            writer = new WALWriter(this.logFilePath);
+            writer = new WALWriter(this.logFilePath, backPressureOn, diskFlushLimit);
 
         } catch (IOException e) {
             throw new RuntimeException("Failed to initialize WAL", e);
@@ -102,15 +108,6 @@ public class KeyValue implements KVStore{
         ttlManagerThread.start();
 
 
-        /*
-        merger = new Merger(this.sstManager, shutdownLatch);
-        this.mergeThread = new Thread(merger);
-        this.mergeThread.setName("SSTable Merger");
-        this.mergeThread.setDaemon(true);
-        this.mergeThread.start();
-        */
-        
-     
         /* it can take up to x amount of tasks/threads when threadpool is out of threads. */
 
         BlockingQueue<Runnable> taskQueue = new ArrayBlockingQueue<>(this.blockingQueueSize);
@@ -132,21 +129,20 @@ public class KeyValue implements KVStore{
     }
 
         @Override
-        public Future<String> getexp(String key){
+        public Future<String> getTTL(String key){
             return threadPool.submit(() -> {
 
-            Iterator<StoreEntry> itr = ttlEntries.iterator();
-            while(itr.hasNext()){
-                StoreEntry se = itr.next();
-                if(se.key.equals(key))
-                    return se.value;
+            if(!ttlEntries.containsKey(key))
+                return null;
+            StoreEntry obj = ttlEntries.get(key);
+
+            if(System.currentTimeMillis() > obj.expiryTime){
+                ttlEntries.remove(key);
+                return obj.value;
             }
-
             return null;
-
         });
     }
-    
     
     @Override
     public void replayLogs(){
@@ -211,9 +207,6 @@ public class KeyValue implements KVStore{
         if(ttlManager != null)
             ttlManager.stopIt();
         
-        //if(merger != null)
-            //merger.stopIt();
-
         if(comThread != null)
             logCompact.stopIt();
 
@@ -239,11 +232,11 @@ public class KeyValue implements KVStore{
     @Override
     public void compactLogging(boolean flag){
         if(flag){
-            this.compactLogging = true;
-            this.comThread = new Thread(logCompact);
-            this.comThread.setDaemon(true);
-            this.comThread.setName("LogCompactor");
-            this.comThread.start();
+            compactLogging = true;
+            comThread = new Thread(logCompact);
+            comThread.setDaemon(true);
+            comThread.setName("LogCompactor");
+            comThread.start();
 
         }else{
             if(this.comThread.isAlive() && this.comThread != null)
@@ -253,12 +246,9 @@ public class KeyValue implements KVStore{
 
     public Future<String> getTask(String key){
             return threadPool.submit(() -> {
-
                 String ans = lruCache.get(key);
-
                 if(ans != null)
                     return ans;
-
                 return memTable.get(key);
 
         });
@@ -300,30 +290,9 @@ public class KeyValue implements KVStore{
 
     public Future<String> addTask(String key ,String value, long expiryTime){
        return threadPool.submit(() -> {
-
-        StoreEntry storeEntry = new StoreEntry(key, value, true, expiryTime);
-
-        if(!this.logging){
-            ttlEntries.add(storeEntry);
+            StoreEntry se = new StoreEntry(key , value, true, expiryTime);
+            ttlEntries.put(key ,se);
             return "OK!";
-        }
-
-        logLock.lock();
-
-        try{
-            LogEntry logEntry = new LogEntry(LogEntry.Operation.PUT,key,value, true, expiryTime);
-            writer.writeToLog(logEntry.toProto());
-            ttlEntries.add(storeEntry);
-            return "OK!";
-
-        }catch(IOException e){
-            System.out.println("Failed to log entry for key: " + key + " error:" + e.getMessage());
-            return "ERROR: log file not initialized properly";
-
-        }
-        finally{
-                logLock.unlock();
-        }
         });
     }
 
@@ -359,7 +328,7 @@ public class KeyValue implements KVStore{
             StoreEntry obj = new StoreEntry(key, null, isTTL, expiryTime);
 
             if(!this.logging){
-                ttlEntries.add(obj);
+                ttlEntries.put(key, obj);
                 return "OK!";
             }
 
@@ -368,7 +337,7 @@ public class KeyValue implements KVStore{
             try{
                 LogEntry logEntry = new LogEntry(LogEntry.Operation.DELETE, key, true , expiryTime);
                 writer.writeToLog(logEntry.toProto());
-                ttlEntries.add(obj);
+                ttlEntries.put(key,obj);
                 return "OK!";
 
             }catch(IOException error){

@@ -1,38 +1,34 @@
-# ByteKV
+# ByteKV😛:
 
-ByteKV is a light-weight, multithreaded key-value store built in Java, inspired from Redis. I implemented this to understand nosql databases better and their internal working.
+#### A Java-Based Multithreaded Key-Value store focused on speed, reliability and persistence of data,It has LSM trees for storage, write ahead logging for replayability when instance crashes, TTL  support for automatic data eviction and LRU caching for fetching faster.
 
----
+## Key Features:
 
-# Features✨
+#### *LSM-Trees* - most useful for writes where sorting and storing is done in background    when compared to on average O(logn) time for B or B+ trees.
 
-###  Log-Structured Merge (LSM) Trees:
-Sure, you can just store in a HashMap but, for storing millions of keys and values, it's pretty much impossible. So, that's why i went with LSM trees where we flush data to disk in sorted order and i'm using .index files to jump to specific keys.
+#### *Write ahead logging* - to guarantee data persistence even if instance crashes.
 
-###  Write-Ahead Logging (WAL):
-Every single operation is logged into a .log file using protobuf binary so that storing and parsing is much faster. This log file could be used to replay all values when database instance crashes.
+#### *Protobuf logging* - to reduce file size, using binary protobuf which could be faster to write and parse.
 
-### Log Compaction:
-A background thread which would start compressing by removing overwritten key and values when number of entries exceed 1000.
+#### *Asynchronous writes* - All writes are handled by a asynchronous thread which can handle flush overflow when log file compaction is going on.
 
-### Multi-Threaded access:
-Instead of spinning up new thread for each request which would lead to context overhead or even worse using only Main thread for serving requests. I'm using threadpool for efficient serving of requests without creating and deleting new threads each time.
+#### *TTL Expiration* - Keys that can become stale are evicted lazily. ByteKV only removes expired keys once about 25% of a random sample of keys have expired, reducing unnecessary scans and keeping performance smooth.
 
-when threadpool is exhausted and blocking queue is also full. it sends a RejectedExecutionException.
+#### *LRU caching* - To reduce reads latency which is the major bottleneck in LSM-Based databases, LRU stores hot data which can be fetched faster.
 
-### Background tasks:
-TTL-Expiry - Instead of searching through whether pair TTL is expired or not which would waste resources.Instead i have implemented lazy cleaning inspired by Redis :P .
-full TTL scan would only trigger when atleast 25% of TTL pairs are expired.So TTl deletes are not immediate.
+#### *SST merging* - Using levelled compaction to decrease the number of SST and overwrite stale data.
 
-###  Bloom Filters:
-Bloom filter is a probabilistic data structure which can help avoid unnecessary disk reads by using hashing,It can give false positives but never false negatives.
+#### *Bloom filters* - To overcome read latency, using bloom filters which can give false positives but never false negatives. Instead of Storing all indexes to each SST , we can sparsely store and use bloom filters when SST size is too large and memory heavy.
 
-###  SSTable Compaction Strategy:
-  To maintain optimized disk usage,when number of SST tables reach more than 5,merging would be triggered and 2 oldest SST tables would be merged into one.
+```markdown
+### Benchmarks
 
-### CLI:
-  added CLI to use keyvalue store from terminal like redis.
+- PUTs: 100,000 ops — avg latency 227µs, max 738ms
+- GETs: 50,000 ops — avg latency 11µs, max 1.18ms
+- TTL expired keys seen: 30,330
+```
 
-### Future implementations:
-    disk operations could be written in c++ for better performance.
-    snapshotting to save log space by deleting old log shit.
+
+
+
+

@@ -7,22 +7,26 @@ import dev.bytekv.proto.LogEntryOuterClass;
 
 import java.io.File;
 import java.util.concurrent.TimeUnit;
-
-
+    
 public class WALWriter{
     private final FileOutputStream fos;
     private final LinkedBlockingQueue<LogEntryOuterClass.LogEntry> queue;
     private final Thread writerThread;
     private volatile boolean running = true;
+    private volatile Boolean backPressureOn;
 
-    private final int MAX_LOG_ENTRIES = 5;
+    private int diskFlushLimit; 
 
-    public WALWriter(String logFilePath) throws IOException{
+    private static final int MAX_LOG_ENTRIES = 5;
+
+    public WALWriter(String logFilePath, Boolean backPressureOn, int diskFlushLimit) throws IOException{
         this.fos = new FileOutputStream(new File(logFilePath), true);
         this.queue = new LinkedBlockingQueue<>(10_000);
+        this.backPressureOn = backPressureOn;
+        this.diskFlushLimit = diskFlushLimit;
 
-        this.writerThread = new Thread(this::processLoop, "WAL-Writer");
-        this.writerThread.start();
+        writerThread = new Thread(this::processLoop, "WAL-Writer");
+        writerThread.start();
 
     }
 
@@ -32,18 +36,18 @@ public class WALWriter{
             throw new IOException("WAL queue overflow");
     }
 
-    private void processLoop(){
+    private void processLoop(){    
         try{
             int logCount = 0;
 
-            while(running || !queue.isEmpty()){
+            while(running && (!queue.isEmpty() || backPressureOn)){
                 LogEntryOuterClass.LogEntry entry = queue.poll(50, TimeUnit.MILLISECONDS);
                 if(entry != null){
                     entry.writeDelimitedTo(fos);
                     ++logCount;
                 }
 
-                if(logCount >= MAX_LOG_ENTRIES){
+                if(logCount >= diskFlushLimit){
                     
                     /*  forcefully flushing from kernel memory to disk for persistance. i'm choosing 5 as batch flushing to disk.
                         as forcefull flushing uses system calls which are expensive.
@@ -64,7 +68,6 @@ public class WALWriter{
         }
     }
 
-    
     public void shutDown() throws IOException, InterruptedException {
         running = false;
         writerThread.join();

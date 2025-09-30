@@ -28,11 +28,14 @@ public class LogCompact implements Runnable {
     private volatile boolean running = true;
     private CountDownLatch shutdownLatch;
 
+    private Boolean backPressureOn;
+
     private KeyValue kv;
 
-    public LogCompact(String logFilePath, String logDir,CountDownLatch latch, KeyValue kv) {
+    public LogCompact(String logFilePath, String logDir,CountDownLatch latch, KeyValue kv, Boolean backPressureOn) {
         this.logFilePath = logFilePath;
         this.logDir = logDir;
+        this.backPressureOn = backPressureOn;
         this.kv = kv;
         this.shutdownLatch = shutdownLatch;
     }
@@ -56,7 +59,7 @@ public class LogCompact implements Runnable {
             try {
                 long currentEntries = LogEntry.returnSerialNumber();
                 if (currentEntries > MAX_ENTRIES) {
-                    kv.backPressureOn = true;
+                    backPressureOn = true;
                     compactLog();
                 }
             } catch (Exception e) {
@@ -108,7 +111,7 @@ public class LogCompact implements Runnable {
         }
         
         finally{
-            kv.backPressureOn = false;
+            backPressureOn = false;
         }
     }
 }

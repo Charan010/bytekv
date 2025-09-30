@@ -4,6 +4,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.io.*;
 
+import dev.bytekv.proto.SSTWriteOuterClass.SSTWrite;
 
 public class MemTable {
 
@@ -22,9 +23,9 @@ public class MemTable {
         return buffer;
     }
 
-    public MemTable(SSTManager sstManager, int flushThreshold) {
+    public MemTable(SSTManager sstManager, int memTableLimit) {
         this.sstManager = sstManager;
-        this.flushThreshold = flushThreshold;
+        this.flushThreshold = memTableLimit;
     }
 
     public void put(String key, String value) throws IOException {
@@ -64,8 +65,10 @@ public class MemTable {
 
     }
 
-
-    public void flush() throws IOException {
+   public synchronized void flush() throws IOException {
+        if(buffer.isEmpty()) 
+            return;
+    
         TreeMap<String, String> snapshot = new TreeMap<>(buffer);
         buffer.clear();
         sstManager.flushToSSTable(snapshot);

@@ -1,11 +1,13 @@
 package dev.bytekv.core;
 
+import java.io.IOException;
+import java.nio.file.Paths;
 import java.util.concurrent.Future;
 
 public interface KVStore {
     Future<String> put(String key, String value);
     Future<String> put(String key, String value, long expiryTime);
-    Future<String> getexp(String key);
+    Future<String> getTTL(String key);
     Future<String> get(String key);
     Future<String> delete(String key);
     Future<String> delete(String key, long expiryTime);
@@ -17,9 +19,13 @@ public interface KVStore {
     void replayLogs();
     void flush();
 
-    static KVStore createDB(){
-        return new KeyValue(100 ,500 , "logs/master.log", "logs");
-
+    static KVStore createDB(int threadPoolSize, int blockingQueueSize, String logFolder, int memTableLimit, int diskFlushLimit) throws IOException{
+        String logFilePath = Paths.get(logFolder, "master.log").toString();
+        try{
+            return new KeyValue(threadPoolSize ,blockingQueueSize ,logFilePath, logFolder, memTableLimit, diskFlushLimit);
+        }catch(IOException e){
+            throw new IOException(e);
+        }
     }
     
     enum ETIME {

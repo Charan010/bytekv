@@ -1,81 +1,88 @@
 package dev.bytekv.ttl;
 
-import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
-
-import java.util.concurrent.CountDownLatch;
-
-
-import dev.bytekv.core.*;
+import java.util.concurrent.*;
+import dev.bytekv.core.KeyValue;
+import dev.bytekv.core.StoreEntry;
 
 /*
-    TTL manager responsibilities
-    run for every x time period
-    take random keys and check for expire . if atleast 25% were expired from that random sample. 
-    do complete scan otherwise leave it out.
- */
+    TTLManager responsibilities:
+    - Runs periodically
+    - Samples random keys and checks for expiry
+    - If enough expired in sample, triggers full scan
+    - Lazy TTL eviction for memory efficiency
+*/
 
-public class TTLManager implements Runnable{
-    private KeyValue keyValue;
-    List<StoreEntry> values;
+public class TTLManager implements Runnable {
+
+    private final KeyValue keyValue;
     private volatile boolean running = true;
-    private CountDownLatch shutdownLatch;
+    private final CountDownLatch shutdownLatch;
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    private final Random random = ThreadLocalRandom.current();
 
-    public TTLManager(KeyValue keyValue, CountDownLatch shutdownLatch){
+    public TTLManager(KeyValue keyValue, CountDownLatch shutdownLatch) {
         this.keyValue = keyValue;
         this.shutdownLatch = shutdownLatch;
     }
 
-    public void stopIt(){
+    public void stopIt() {
         running = false;
         scheduler.shutdown();
+        try {
+            if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                scheduler.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            scheduler.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+        shutdownLatch.countDown();
     }
 
     @Override
-    public void run(){
-        scheduler.scheduleAtFixedRate(() ->{
+    public void run() {
+        System.out.println("---- Starting TTL lazy eviction :P ----");
+        scheduler.scheduleAtFixedRate(() -> {
+            if (!running) return;
 
-        if(!running){
-            shutdownLatch.countDown();
-            return;
-        }
+            int expiredCount = 0;
+            int sampleSize = Math.min(20, keyValue.ttlEntries.size());
+            if (sampleSize == 0) return;
 
-        int expiredCount = 0;
+            // sample random entries
+            List<StoreEntry> values = keyValue.ttlEntries.values().stream().toList();
+            for (int i = 0; i < sampleSize; i++) {
+                StoreEntry se = values.get(random.nextInt(values.size()));
+                if (se.TTL && System.currentTimeMillis() > se.expiryTime)
+                    expiredCount++;
+            }
 
-        /* converting hashsets into a list to "get" more randomly */
-        this.values = new ArrayList<>(keyValue.ttlEntries);
-        Random rand = ThreadLocalRandom.current();
+            // if enough expired, trigger full scan
+            if (expiredCount >= Math.max(5, sampleSize / 4)) {
+                System.out.println("----- Found expired TTL entries. Running full scan -----");
+                ttlChecker();
+            }
 
-        for(int i = 0; i < Math.min(20, values.size()); ++i){
-            StoreEntry se = values.get(rand.nextInt(values.size()));
-            
-            if(se.TTL && System.currentTimeMillis() > se.expiryTime)
-                ++expiredCount;
-            
-        }
-        if(expiredCount >= Math.max(5, values.size() / 4)){
-            System.out.println("----- Found 5+ expired TTL entries. running full scan -----");
-            ttlChecker();
-        }
-
-        },0 ,10, TimeUnit.SECONDS);
+        }, 0, 10, TimeUnit.SECONDS);
     }
 
+    // full scan removes expired entries from the actual ttlEntries map
     private void ttlChecker() {
+        Iterator<StoreEntry> it = keyValue.ttlEntries.values().iterator();
+        long now = System.currentTimeMillis();
+        int removed = 0;
 
-    Iterator<StoreEntry> it = keyValue.ttlEntries.iterator();
-
-    while (it.hasNext()) {
-        StoreEntry se = it.next();
-        if (se.TTL && System.currentTimeMillis() >= se.expiryTime) 
-            it.remove();
-    }
+        while (it.hasNext()) {
+            StoreEntry se = it.next();
+            if (se.TTL && now >= se.expiryTime) {
+                it.remove();
+                removed++;
+            }
+        }
+        if (removed > 0) 
+            System.out.println("TTLManager removed " + removed + " expired keys.");
     }
 }

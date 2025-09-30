@@ -3,45 +3,33 @@ package dev.bytekv.core;
 import java.util.*;
 import java.util.concurrent.locks.*;
 
-
-public class LRUCache<K, V> {
-    private final LinkedHashMap<K, V> map;
+public class LRUCache{
+    private final LinkedHashMap<String, String> map;
     private final int capacity;
-    private int totalHits;
-    private int succesfulHits;
     
     private final ReadWriteLock lock = new ReentrantReadWriteLock();
     private final Lock readLock = lock.readLock();
     private final Lock writeLock = lock.writeLock();
 
     public LRUCache(int capacity) {
-
         this.capacity = capacity;
-        this.totalHits = 0;
-        this.succesfulHits = 0;
         this.map = new LinkedHashMap<>(capacity, 0.75f, true) {
-            protected boolean removeEldestEntry(Map.Entry<K, V> eldest) {
+            protected boolean removeEldestEntry(Map.Entry<String, String> eldest) {
                 return size() > LRUCache.this.capacity;
             }
         };
     }
 
-    public V get(K key) {
+    public String get(String key) {
         readLock.lock();
         try {
-
-            this.totalHits++;
-            if(map.get(key)!=null)
-                this.succesfulHits++;
-
             return map.get(key);
-
-        } finally {
+        }finally {
             readLock.unlock();
         }
     }
 
-    public void put(K key, V value) {
+    public void put(String key, String value) {
         writeLock.lock();
         try {
             map.put(key, value);
@@ -67,10 +55,4 @@ public class LRUCache<K, V> {
             writeLock.unlock();
         }
     }
-
-    public String getStats(){
-        String ans = String.valueOf(totalHits) + "," + String.valueOf(succesfulHits) + "," + String.valueOf(capacity);
-        return ans;
-    }
-
 }
