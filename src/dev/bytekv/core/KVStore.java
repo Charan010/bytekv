@@ -19,10 +19,10 @@ public interface KVStore {
     void replayLogs();
     void flush();
 
-    static KVStore createDB(int threadPoolSize, int blockingQueueSize, String logFolder, int memTableLimit, int diskFlushLimit) throws IOException{
+    static KVStore createDB(int threadPoolSize, int blockingQueueSize, String logFolder, int memTableLimit) throws IOException{
         String logFilePath = Paths.get(logFolder, "master.log").toString();
         try{
-            return new KeyValue(threadPoolSize ,blockingQueueSize ,logFilePath, logFolder, memTableLimit, diskFlushLimit);
+            return new KeyValue(threadPoolSize ,blockingQueueSize ,logFilePath, logFolder, memTableLimit);
         }catch(IOException e){
             throw new IOException(e);
         }

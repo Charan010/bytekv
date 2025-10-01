@@ -23,9 +23,9 @@
 ```markdown
 ### Benchmarks
 
-- PUTs: 100,000 ops — avg latency 227µs, max 738ms
-- GETs: 50,000 ops — avg latency 11µs, max 1.18ms
-- TTL expired keys seen: 30,330
+- **PUTs:** 100,000 ops — avg latency 58 µs, max 49 ms, throughput ~135,860 ops/sec
+- **GETs:** 50,000 ops — avg latency 11 µs, max 1.12 ms
+
 ```
 
 

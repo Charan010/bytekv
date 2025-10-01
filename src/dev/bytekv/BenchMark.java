@@ -1,7 +1,6 @@
 package dev.bytekv;
 
 import dev.bytekv.core.KVStore;
-
 import java.util.Random;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
@@ -9,7 +8,9 @@ import java.util.concurrent.atomic.AtomicLong;
 public class BenchMark {
 
     public static void main(String[] args) throws Exception {
-        KVStore kv = KVStore.createDB(4, 1000, "logs", 5000, 20000);
+        KVStore kv = KVStore.createDB(30, 100, "logs", 3500);
+        //kv.replayLogs();
+        kv.logging(true);
 
         ExecutorService exec = Executors.newFixedThreadPool(8);
         Random rand = new Random();
@@ -31,10 +32,10 @@ public class BenchMark {
             exec.submit(() -> {
                 try {
                     long putStart = System.nanoTime();
-                    if (id % 2 == 0)
-                        kv.put("key" + id, "value" + id, 5000).get();
-                    else
-                        kv.put("key" + id, "value" + id).get();
+                    if (id % 2 == 0) kv
+                        .put("key" + id, "value" + id, 5000)
+                        .get();
+                    else kv.put("key" + id, "value" + id).get();
                     long putEnd = System.nanoTime();
                     long duration = putEnd - putStart;
 
@@ -47,6 +48,7 @@ public class BenchMark {
                 }
             });
         }
+
         latch.await();
         long end = System.nanoTime();
         double putThroughput = puts / ((end - start) / 1e9);
@@ -74,12 +76,22 @@ public class BenchMark {
         exec.shutdown();
 
         System.out.println("\n=== ByteKV Benchmark Results ===");
-        System.out.printf("PUTs: %d ops, avg latency %.2f µs, max latency %.2f ms, throughput %.2f ops/sec%n",
-                puts, putSumNano.get() / 1e3 / puts, putMaxNano.get() / 1e6, putThroughput);
-        System.out.printf("GETs: %d ops, avg latency %.2f µs, max latency %.2f ms%n",
-                gets, getSumNano.get() / 1e3 / gets, getMaxNano.get() / 1e6);
+        System.out.printf(
+            "PUTs: %d ops, avg latency %.2f µs, max latency %.2f ms, throughput %.2f ops/sec%n",
+            puts,
+            putSumNano.get() / 1e3 / puts,
+            putMaxNano.get() / 1e6,
+            putThroughput
+        );
+        System.out.printf(
+            "GETs: %d ops, avg latency %.2f µs, max latency %.2f ms%n",
+            gets,
+            getSumNano.get() / 1e3 / gets,
+            getMaxNano.get() / 1e6
+        );
         System.out.println("TTL expired keys seen: " + ttlExpiredCount.get());
 
         kv.shutDown();
+
     }
 }

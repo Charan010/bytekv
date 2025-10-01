@@ -11,7 +11,7 @@ public class MemTable {
     private static final int DEFAULT_FLUSH_THRESHOLD = 1024;
     private static final String TOMBSTONE = "__<deleted>__";
 
-    private final ConcurrentSkipListMap<String ,String> buffer = new ConcurrentSkipListMap<>();
+    private final ConcurrentSkipListMap<String, String> buffer = new ConcurrentSkipListMap<>();
     private final SSTManager sstManager;
     private final int flushThreshold;
 
@@ -19,58 +19,63 @@ public class MemTable {
         this(sstManager, DEFAULT_FLUSH_THRESHOLD);
     }
 
-    public ConcurrentSkipListMap<String,String> getBuffer(){
-        return buffer;
-    }
-
-    public MemTable(SSTManager sstManager, int memTableLimit) {
+    public MemTable(SSTManager sstManager, int flushThreshold) {
         this.sstManager = sstManager;
-        this.flushThreshold = memTableLimit;
+        this.flushThreshold = flushThreshold;
     }
 
     public void put(String key, String value) throws IOException {
-            buffer.put(key, value);
-            if (buffer.size() >= flushThreshold)
-                flush();
+        buffer.put(key, value);
+        if (buffer.size() >= flushThreshold)
+            swapAndFlush();
     }
 
     public String delete(String key) throws IOException {
+        if (!buffer.containsKey(key))
+            return "NO KEY FOUND";
 
-            if (!buffer.containsKey(key))
-                return "NO KEY FOUND";
+        buffer.put(key, TOMBSTONE);
+        if (buffer.size() >= flushThreshold)
+            swapAndFlush();
 
-            buffer.put(key, TOMBSTONE);
-            if (buffer.size() >= flushThreshold)
-                flush();
-
-            return "OK!";
+        return "OK!";
     }
 
     public String get(String key) throws IOException {
         String val = buffer.get(key);
-        if (TOMBSTONE.equals(val)) 
-            return null;
-        if (val != null) 
-            return val;
+        if (TOMBSTONE.equals(val)) return null;
+        if (val != null) return val;
 
         for (SSTable table : sstManager.getAllSSTables()) {
             val = table.get(key);
-            if (TOMBSTONE.equals(val)) 
-                return null;
-            if (val != null) 
-                return val;
+            if (TOMBSTONE.equals(val)) return null;
+            if (val != null) return val;
         }
-
         return null;
-
     }
 
-   public synchronized void flush() throws IOException {
-        if(buffer.isEmpty()) 
+    private void swapAndFlush() {
+        TreeMap<String, String> snapShot;
+        synchronized (this) {
+            if (buffer.isEmpty())
+                return;
+            snapShot = new TreeMap<>(buffer);
+            buffer.clear();
+        }
+        new Thread(() -> {
+            try {
+                sstManager.flushToSSTable(snapShot);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }).start();
+    }
+
+    public synchronized void flush() throws IOException {
+        if (buffer.isEmpty()) 
             return;
-    
-        TreeMap<String, String> snapshot = new TreeMap<>(buffer);
+        TreeMap<String, String> snapShot = new TreeMap<>(buffer);
         buffer.clear();
-        sstManager.flushToSSTable(snapshot);
+        sstManager.flushToSSTable(snapShot);
     }
 }

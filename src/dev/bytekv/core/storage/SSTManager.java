@@ -114,7 +114,7 @@ public class SSTManager {
         folder.delete();
     }
 
-    private void tieredCompaction() throws IOException {
+    private synchronized void tieredCompaction() throws IOException {
         for (int level : new ArrayList<>(levels.keySet())) {
             List<SSTable> ssts = levels.get(level);
 

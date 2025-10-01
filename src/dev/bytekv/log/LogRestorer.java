@@ -14,10 +14,8 @@ public class LogRestorer{
     }
 
     public void replayLogs() {
-
-        System.out.println("Triggered replaying log :P");
-
         
+        System.out.println("Triggered replaying log :P");
         String logFilepath = keyValue.logFilePath;
 
         try (FileInputStream fis = new FileInputStream(logFilepath)) {

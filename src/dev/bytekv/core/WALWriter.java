@@ -1,69 +1,91 @@
 package dev.bytekv.core;
 
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.util.concurrent.LinkedBlockingQueue;
 import dev.bytekv.proto.LogEntryOuterClass;
 
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
-    
-public class WALWriter{
+
+public class WALWriter {
     private final FileOutputStream fos;
     private final LinkedBlockingQueue<LogEntryOuterClass.LogEntry> queue;
     private final Thread writerThread;
+    private final Thread flushThread;
     private volatile boolean running = true;
-    private volatile Boolean backPressureOn;
+    private final boolean backPressureOn;
 
-    private int diskFlushLimit; 
+    private final int MAX_BATCH_SIZE = 50;      
+    private final int FLUSH_INTERVAL_MS = 200;  
+    private final int QUEUE_CAPACITY = 10_000;
 
-    private static final int MAX_LOG_ENTRIES = 5;
+    public WALWriter(String logFilePath, boolean backPressureOn) throws IOException {
+        File f = new File(logFilePath);
+        f.getParentFile().mkdirs();
 
-    public WALWriter(String logFilePath, Boolean backPressureOn, int diskFlushLimit) throws IOException{
-        this.fos = new FileOutputStream(new File(logFilePath), true);
-        this.queue = new LinkedBlockingQueue<>(10_000);
+        this.fos = new FileOutputStream(f, true);
+        this.queue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
         this.backPressureOn = backPressureOn;
-        this.diskFlushLimit = diskFlushLimit;
 
         writerThread = new Thread(this::processLoop, "WAL-Writer");
         writerThread.start();
 
+        flushThread = new Thread(this::periodicFlushLoop, "WAL-Periodic-Flush");
+        flushThread.start();
     }
 
-    public void writeToLog(LogEntryOuterClass.LogEntry entry) throws IOException{
-        //System.out.println("writing :/ " + entry.getKey() + " " + entry.getValue());
-        if(!queue.offer(entry))
-            throw new IOException("WAL queue overflow");
+    public void writeToLog(LogEntryOuterClass.LogEntry entry) throws IOException, InterruptedException {
+        if (backPressureOn) {
+            if (!queue.offer(entry, 30, TimeUnit.MILLISECONDS))
+                throw new IOException("WAL queue overflow (backpressure applied)");
+            
+        } else {
+            if (!queue.offer(entry)) 
+                throw new IOException("WAL queue overflow");
+        }
     }
 
-    private void processLoop(){    
-        try{
-            int logCount = 0;
+    private void processLoop() {
+        List<LogEntryOuterClass.LogEntry> batch = new ArrayList<>(MAX_BATCH_SIZE);
+        try {
+            while (running || !queue.isEmpty()) {
+                batch.clear();
+                queue.drainTo(batch, MAX_BATCH_SIZE);
 
-            while(running && (!queue.isEmpty() || backPressureOn)){
-                LogEntryOuterClass.LogEntry entry = queue.poll(50, TimeUnit.MILLISECONDS);
-                if(entry != null){
-                    entry.writeDelimitedTo(fos);
-                    ++logCount;
+                if (batch.isEmpty()) {
+                    Thread.sleep(5); // avoid busy wait
+                    continue;
                 }
 
-                if(logCount >= diskFlushLimit){
-                    
-                    /*  forcefully flushing from kernel memory to disk for persistance. i'm choosing 5 as batch flushing to disk.
-                        as forcefull flushing uses system calls which are expensive.
-                     */
+                synchronized (fos) {
+                    for (LogEntryOuterClass.LogEntry entry : batch) {
+                        entry.writeDelimitedTo(fos);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
 
+    private void periodicFlushLoop() {
+        try {
+            while (running) {
+                Thread.sleep(FLUSH_INTERVAL_MS);
+                synchronized (fos) {
                     fos.flush();
-                    fos.getFD().sync();
-                    logCount = 0;
+                    fos.getFD().sync(); 
                 }
-
             }
 
-            fos.flush();
-            fos.getFD().sync();
-        
-        }catch(Exception e){
+            synchronized (fos) {
+                fos.flush();
+                fos.getFD().sync();
+            }
+        } catch (Exception e) {
             e.printStackTrace();
         }
     }
@@ -71,7 +93,12 @@ public class WALWriter{
     public void shutDown() throws IOException, InterruptedException {
         running = false;
         writerThread.join();
-        fos.close();
-    }
+        flushThread.join();
 
+        synchronized (fos) {
+            fos.flush();
+            fos.getFD().sync();
+            fos.close();
+        }
+    }
 }

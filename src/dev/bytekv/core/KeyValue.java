@@ -51,6 +51,8 @@ public class KeyValue implements KVStore{
     //private HashMap<String,Publisher> publishersList;
 
     private LRUCache lruCache;
+    private LogRestorer lr;
+
 
     public ConcurrentHashMap<String, StoreEntry> ttlEntries;
     SSTManager sstManager;
@@ -61,15 +63,12 @@ public class KeyValue implements KVStore{
     private WALWriter writer;
 
     public int memTableLimit;
-    public int diskFlushLimit;
 
-
-    public KeyValue(int threadPoolSize,int BlockingQueueSize ,String logFilePath, String logPath, int memTableLimit, int diskFlushLimit) throws IOException
+    public KeyValue(int threadPoolSize,int BlockingQueueSize ,String logFilePath, String logPath, int memTableLimit) throws IOException
      {
         this.logFilePath = logFilePath;
         this.logPath = logPath;
         this.blockingQueueSize = BlockingQueueSize;
-        this.diskFlushLimit = diskFlushLimit;
         this.memTableLimit = memTableLimit;
 
         ttlEntries = new ConcurrentHashMap<>();        
@@ -80,13 +79,13 @@ public class KeyValue implements KVStore{
         }
 
         memTable = new MemTable(this.sstManager, memTableLimit);
-        lruCache = new LRUCache(1500);
+        lruCache = new LRUCache(2000);
         
         backPressureOn = false;
         logCompact = new LogCompact(this.logFilePath, this.logPath, shutdownLatch, this, backPressureOn);
         
         try {
-            writer = new WALWriter(this.logFilePath, backPressureOn, diskFlushLimit);
+            writer = new WALWriter(this.logFilePath, backPressureOn);
 
         } catch (IOException e) {
             throw new RuntimeException("Failed to initialize WAL", e);
@@ -111,6 +110,9 @@ public class KeyValue implements KVStore{
         /* it can take up to x amount of tasks/threads when threadpool is out of threads. */
 
         BlockingQueue<Runnable> taskQueue = new ArrayBlockingQueue<>(this.blockingQueueSize);
+
+        this.lr = new LogRestorer(this);
+
 
        this.threadPool = new ThreadPoolExecutor(
             threadPoolSize,
@@ -146,7 +148,6 @@ public class KeyValue implements KVStore{
     
     @Override
     public void replayLogs(){
-        LogRestorer lr = new LogRestorer(this);
         lr.replayLogs();
     }
 
@@ -263,7 +264,6 @@ public class KeyValue implements KVStore{
    
     public Future<String> addTask(String key ,String value){
         return threadPool.submit(() -> {
-
             if(!logging){
                 lruCache.put(key, value);
                 memTable.put(key,value);
