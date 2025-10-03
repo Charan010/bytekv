@@ -18,9 +18,10 @@ public class WALWriter {
     private volatile boolean running = true;
     private final boolean backPressureOn;
 
-    private final int MAX_BATCH_SIZE = 50;      
-    private final int FLUSH_INTERVAL_MS = 200;  
-    private final int QUEUE_CAPACITY = 10_000;
+    private final int MAX_BATCH_SIZE = 200;  
+    private final int FLUSH_INTERVAL_MS = 100;   
+    private final int QUEUE_CAPACITY = 20_000;   
+    private final int SYNC_INTERVAL_MS = 1000;
 
     public WALWriter(String logFilePath, boolean backPressureOn) throws IOException {
         File f = new File(logFilePath);
@@ -56,7 +57,7 @@ public class WALWriter {
                 queue.drainTo(batch, MAX_BATCH_SIZE);
 
                 if (batch.isEmpty()) {
-                    Thread.sleep(5); // avoid busy wait
+                    Thread.sleep(5); 
                     continue;
                 }
 
@@ -72,18 +73,20 @@ public class WALWriter {
     }
 
     private void periodicFlushLoop() {
+        long lastSyncTime = System.currentTimeMillis();
+
         try {
             while (running) {
                 Thread.sleep(FLUSH_INTERVAL_MS);
                 synchronized (fos) {
                     fos.flush();
-                    fos.getFD().sync(); 
-                }
-            }
 
-            synchronized (fos) {
-                fos.flush();
-                fos.getFD().sync();
+                long now = System.currentTimeMillis();
+                if (now - lastSyncTime >= SYNC_INTERVAL_MS) {
+                        fos.getFD().sync();
+                        lastSyncTime = now;
+                    }
+                }
             }
         } catch (Exception e) {
             e.printStackTrace();

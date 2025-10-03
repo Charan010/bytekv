@@ -5,57 +5,52 @@ import java.time.Instant;
 
 import dev.bytekv.proto.LogEntryOuterClass;
 
-
 public class LogEntry implements Serializable{
     private final Operation operation;
     private final String key;
     private final String value;
     private final long timeStamp;
-    private final long number;
-    private final boolean isTTL;
-    private final long expiryTime;
 
     public enum Operation {
         PUT, DELETE
     }
 
-    private static volatile long serialNumber = 0;
+    private static volatile int serialNumber = 0;
+    private static int lastTimestamp = 0; 
 
-    public static long returnSerialNumber() {
+   public static long returnSerialNumber() {
         return serialNumber;
     }
 
-    private synchronized static long getNextSerialNumber() {
+   /* private synchronized static long getNextSerialNumber() {
         return ++serialNumber;
-    }
+    } */
 
-    public LogEntry(Operation operation, String key, String value, boolean isTTL, long expiryTime) {
+    public LogEntry(Operation operation, String key, String value) {
         this.operation = operation;
         this.key = key;
         this.value = value;
-        this.isTTL = isTTL;
-        this.expiryTime = expiryTime;
         this.timeStamp = Instant.now().toEpochMilli();
-        this.number = getNextSerialNumber();
-    }
-
-    public LogEntry(Operation operation, String key, boolean isTTL, long expiryTime) {
-        this(operation, key, null, isTTL, expiryTime);
+        //this.number = getNextSerialNumber();
     }
 
     public LogEntryOuterClass.LogEntry toProto() {
+
+        ++serialNumber;
+
+        int delta = (int)(this.timeStamp - lastTimestamp);  
+        lastTimestamp = (int) this.timeStamp;          
+
+        LogEntryOuterClass.LogEntry.Operation protoOp =
+            this.operation == Operation.PUT
+                ? LogEntryOuterClass.LogEntry.Operation.PUT
+                : LogEntryOuterClass.LogEntry.Operation.DELETE;
+
         return LogEntryOuterClass.LogEntry.newBuilder()
-            .setSerialNum(this.number)
-            .setTimestamp(this.timeStamp)
-            .setOperation(this.operation.name())
+            .setTimestamp(delta)
+            .setOp(protoOp)
             .setKey(this.key)
             .setValue(this.value != null ? this.value : "")
-            .setIsTTL(this.isTTL)
-            .setExpiryTime(this.expiryTime)
             .build();
-    }
-
-    public byte[] toBytes() {
-        return toProto().toByteArray();
     }
 }

@@ -23,32 +23,30 @@ public class LogRestorer{
 
             /* im currently using protobuf to store log in binary format for faster writes and retrivals */
             LogEntryOuterClass.LogEntry entry = LogEntryOuterClass.LogEntry.parseDelimitedFrom(fis);
-            if (entry == null) break;
+            if (entry == null)
+                break;
 
             String key = entry.getKey();
             String value = entry.getValue();
-            String operation = entry.getOperation();
-            boolean isTTL = entry.getIsTTL();
-            long expiryTime = entry.getExpiryTime();
+            LogEntryOuterClass.LogEntry.Operation protoOp = entry.getOp();
 
-            System.out.println("key:"+key + " value:" +value + " operation:"+operation + "isTTL:" + isTTL);
-
-            if (!isTTL) {
-                if (operation.equals("PUT"))
-                    keyValue.put(key, value);
-
-                else if (operation.equals("DELETE"))
-                    keyValue.delete(key);
-            }else {
-               
-                if (System.currentTimeMillis() > expiryTime)
-                    keyValue.delete(key); 
-                
-                else {
-                    if (operation.equals("PUT"))
-                        keyValue.put(key, value, expiryTime);
-                }
+            String operation = "";
+            switch (protoOp) {
+                case PUT:
+                    operation = "PUT";
+                    break;
+                case DELETE:
+                    operation = "DELETE";
+                    break;
             }
+
+            System.out.println("Operation: " + operation + " key: " + key + " value: " + value);
+            
+            if(operation.equals("PUT"))
+                keyValue.addTask(key , value);
+            
+            else if(operation.equals("DELETE"))
+                keyValue.deleteTask(key);
         }
     } catch (IOException e) {
         System.out.println("Error replaying logs: " + e.getMessage());

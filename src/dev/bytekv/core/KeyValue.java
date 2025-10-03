@@ -140,9 +140,9 @@ public class KeyValue implements KVStore{
 
             if(System.currentTimeMillis() > obj.expiryTime){
                 ttlEntries.remove(key);
-                return obj.value;
+                return null;
             }
-            return null;
+            return obj.value;
         });
     }
     
@@ -176,16 +176,6 @@ public class KeyValue implements KVStore{
     public Future<String> delete(String key) {
         try {
             return deleteTask(key); 
-        } catch (Exception e) {
-            System.out.println("Delete failed: " + e.getMessage());
-            return CompletableFuture.completedFuture(null); 
-        }
-    }
-
-     @Override
-    public Future<String> delete(String key, long expiryTime) {
-        try {
-            return deleteTask(key, true, expiryTime + System.currentTimeMillis());
         } catch (Exception e) {
             System.out.println("Delete failed: " + e.getMessage());
             return CompletableFuture.completedFuture(null); 
@@ -275,7 +265,7 @@ public class KeyValue implements KVStore{
             try{
                 lruCache.put(key, value);
                 memTable.put(key,value);
-                LogEntry entry = new LogEntry(LogEntry.Operation.PUT, key, value, false, -1);
+                LogEntry entry = new LogEntry(LogEntry.Operation.PUT, key, value);
                 writer.writeToLog(entry.toProto());
                 return "OK!";
 
@@ -304,7 +294,7 @@ public class KeyValue implements KVStore{
             logLock.lock();
 
             try{
-                LogEntry logEntry = new LogEntry(LogEntry.Operation.DELETE, key, false , 0);
+                LogEntry logEntry = new LogEntry(LogEntry.Operation.DELETE, key, null);
                 writer.writeToLog(logEntry.toProto());
                 return "OK!";
 
@@ -313,38 +303,6 @@ public class KeyValue implements KVStore{
 
             }finally{
                 logLock.unlock();
-            }
-        });
-    }
-
-
-    /* overloading deleteTask with delayMs to delay deletes */
-    public Future<String> deleteTask(String key,boolean isTTL, long expiryTime){
-        return threadPool.submit(() ->{
-
-            if(memTable.get(key) == null)
-                return "null";
-            
-            StoreEntry obj = new StoreEntry(key, null, isTTL, expiryTime);
-
-            if(!this.logging){
-                ttlEntries.put(key, obj);
-                return "OK!";
-            }
-
-            logLock.lock();
-
-            try{
-                LogEntry logEntry = new LogEntry(LogEntry.Operation.DELETE, key, true , expiryTime);
-                writer.writeToLog(logEntry.toProto());
-                ttlEntries.put(key,obj);
-                return "OK!";
-
-            }catch(IOException error){
-                return "ERROR: log file not initialized properly";
-
-            }finally{
-                    logLock.unlock();
             }
         });
     }

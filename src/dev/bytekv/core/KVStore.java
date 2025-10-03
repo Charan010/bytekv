@@ -10,9 +10,7 @@ public interface KVStore {
     Future<String> getTTL(String key);
     Future<String> get(String key);
     Future<String> delete(String key);
-    Future<String> delete(String key, long expiryTime);
     
-
     void shutDown();
     void compactLogging(boolean flag);
     void logging(boolean flag);

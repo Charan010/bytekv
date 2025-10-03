@@ -79,7 +79,17 @@ public class LogCompact implements Runnable {
                 if (entry == null) break;
 
                 String key = entry.getKey();
-                String op = entry.getOperation();
+                LogEntryOuterClass.LogEntry.Operation protoOp = entry.getOp();
+
+                String op = "";
+                switch (protoOp) {
+                    case PUT:
+                        op = "PUT";
+                        break;
+                    case DELETE:
+                        op = "DELETE";
+                        break;
+                }
 
                 if (op.equals("DELETE")) {
                     latestOps.remove(key); 
