@@ -43,10 +43,11 @@ public class LogRestorer{
             System.out.println("Operation: " + operation + " key: " + key + " value: " + value);
             
             if(operation.equals("PUT"))
-                keyValue.addTask(key , value);
+                keyValue.memTable.put(key , value);
             
             else if(operation.equals("DELETE"))
-                keyValue.deleteTask(key);
+                keyValue.memTable.delete(key);
+                
         }
     } catch (IOException e) {
         System.out.println("Error replaying logs: " + e.getMessage());

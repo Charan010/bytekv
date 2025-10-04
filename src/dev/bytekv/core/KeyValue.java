@@ -40,7 +40,6 @@ public class KeyValue implements KVStore{
     private final String logPath;
     private final int blockingQueueSize;
 
-    private boolean logging = true;
     private boolean compactLogging = false;
     private Thread comThread;
     Thread ttlManagerThread;
@@ -53,10 +52,9 @@ public class KeyValue implements KVStore{
     private LRUCache lruCache;
     private LogRestorer lr;
 
-
     public ConcurrentHashMap<String, StoreEntry> ttlEntries;
     SSTManager sstManager;
-    private MemTable memTable;
+    public MemTable memTable;
 
     private TTLManager ttlManager;
     private LogCompact logCompact;
@@ -149,11 +147,6 @@ public class KeyValue implements KVStore{
     @Override
     public void replayLogs(){
         lr.replayLogs();
-    }
-
-    @Override
-    public void logging(boolean flag){
-        this.logging = flag;
     }
 
     @Override
@@ -254,12 +247,6 @@ public class KeyValue implements KVStore{
    
     public Future<String> addTask(String key ,String value){
         return threadPool.submit(() -> {
-            if(!logging){
-                lruCache.put(key, value);
-                memTable.put(key,value);
-                return "OK!";
-            }
-
             logLock.lock();
 
             try{
@@ -288,14 +275,12 @@ public class KeyValue implements KVStore{
 
     public Future<String> deleteTask(String key) {
         return threadPool.submit(() ->{
-            if(!this.logging){
-                return memTable.delete(key);
-            }
             logLock.lock();
 
             try{
                 LogEntry logEntry = new LogEntry(LogEntry.Operation.DELETE, key, null);
                 writer.writeToLog(logEntry.toProto());
+                memTable.delete(key);
                 return "OK!";
 
             }catch(IOException error){

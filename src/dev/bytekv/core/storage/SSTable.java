@@ -3,12 +3,13 @@ package dev.bytekv.core.storage;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Paths;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
+import java.util.regex.Pattern;
 import java.nio.file.Files;
 import dev.bytekv.proto.SSTWriteOuterClass;
-import java.util.regex.Pattern;
 
 /*
     keys and values are flushed into instance of this. it will load indices of each pair from .index file
@@ -17,7 +18,7 @@ import java.util.regex.Pattern;
  */
 
 public class SSTable {
-    public Map<String, Long> indexMap;
+    public LinkedHashMap<String, Long> indexMap;
     private String dataFile;
     private String indexFile;
     private String dirName;
@@ -30,10 +31,16 @@ public class SSTable {
     private BufferedWriter indexWriter;
     private BufferedWriter dataWriter;
     private RandomAccessFile dataSeeker;
+    private DataOutputStream dataOut; 
+
 
     private static final String TOMBSTONE = "__<deleted>__";
-    private static final String DELIMITER = "::|::";
+    private static final String DELIMITER = "::||::";
     
+    private long lastSeenIndexLength = 0;
+    //instead of keeping indices for all entries, im sparsely storing indexes for every 4KB.
+    private static final int MAX_SPARSE_INDEX = 4096;
+
     public SSTable(int sstNumber) throws IOException {
         this.bloomFilter = new BloomFilter(10000);
         this.padded = String.format("%03d", sstNumber);
@@ -41,13 +48,12 @@ public class SSTable {
 
         new File(dirName).mkdir();
             
-        this.indexMap = new HashMap<>();
+        this.indexMap = new LinkedHashMap<>();
         this.indexFile = "sstable-" + padded + ".index";
         this.dataFile = "sstable-" + padded + ".data";
 
         String indexPath = Paths.get(dirName, this.indexFile).toString();
         String dataPath = Paths.get(dirName, this.dataFile).toString();
-
 
         new File(indexPath).createNewFile();
         new File(dataPath).createNewFile();
@@ -55,6 +61,8 @@ public class SSTable {
         this.indexWriter = new BufferedWriter(new FileWriter(indexPath));
         this.dataWriter = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(dataPath)));
         this.dataSeeker = new RandomAccessFile(dataPath, "r");
+        dataOut = new DataOutputStream(new FileOutputStream(Paths.get(dirName, dataFile).toString(), true));
+
     }
 
     public SSTable(File folder) throws IOException {
@@ -68,7 +76,8 @@ public class SSTable {
         String dataPath = Paths.get(dirName, dataFile).toString();
 
         this.dataSeeker = new RandomAccessFile(dataPath, "r");
-        this.indexMap = new HashMap<>();
+        this.indexMap = new LinkedHashMap<>();
+        dataOut = new DataOutputStream(new FileOutputStream(Paths.get(dirName, dataFile).toString(), true));
 
         loadFromIndexFile();
     }
@@ -89,29 +98,27 @@ public class SSTable {
         .setIsTombstone(isTombStone)
         .build();
 
-        
         byte[] bytes = entry.toByteArray();
-        indexMap.put(key, offSet);
+        
+        dataOut.writeInt(bytes.length);
+        dataOut.write(bytes);
 
-        DataOutputStream dos = new DataOutputStream(new FileOutputStream(
-        Paths.get(dirName, dataFile).toString(), true));
-        dos.writeInt(bytes.length); // length prefix
-        dos.write(bytes);
-        dos.close();
+        if(lastSeenIndexLength > MAX_SPARSE_INDEX){
+            indexWriter.write(key + DELIMITER + this.offSet + "\n");
+            indexMap.put(key, offSet);
+            lastSeenIndexLength = 0;
+        }
 
-        this.indexWriter.write(key + ":" + this.offSet + "\n");
-
-        this.offSet += 4 + bytes.length;
-
+        offSet += 4 + bytes.length;
+        lastSeenIndexLength += (4 + bytes.length);
         bloomFilter.add(key);
     }
 
-    void flush(){
-        try{
-        this.dataWriter.flush();
-        this.indexWriter.flush();
-
-        }catch(IOException e){
+    void flush() {
+        try {
+            dataOut.flush();
+            indexWriter.flush();
+        }   catch(IOException e) {
             System.out.println(e.getMessage());
         }
     }
@@ -120,26 +127,43 @@ public class SSTable {
         if (!bloomFilter.mightContain(key))
             return null;
 
-        Long offset = this.indexMap.get(key);
-        if(offset == null)
-             return null;
+        Entry<String, Long> nearest = null;
+        for(Map.Entry<String, Long> e : indexMap.entrySet()){
+            if(e.getKey().compareTo(key) <= 0 )
+                nearest = e;
+            else
+                break;
+        }
 
-        dataSeeker.seek(offset);
+        long startOffSet = (nearest == null) ? 0 : nearest.getValue();
+        dataSeeker.seek(startOffSet);
 
-        int length = dataSeeker.readInt();
-        byte[] buf = new byte[length];
-        dataSeeker.readFully(buf);
+        while (dataSeeker.getFilePointer() < dataSeeker.length()) {
+            int length = dataSeeker.readInt();
+            byte[] buf = new byte[length];
+            dataSeeker.readFully(buf);
 
-        SSTWriteOuterClass.SSTWrite entry = SSTWriteOuterClass.SSTWrite.parseFrom(buf);
+            SSTWriteOuterClass.SSTWrite entry = SSTWriteOuterClass.SSTWrite.parseFrom(buf);
+            String keyFromSST = entry.getKey();
 
-        if(entry.getIsTombstone())
-             return null;
+            // tombstone check
+            if (keyFromSST.equals(key) && entry.getIsTombstone())
+                return null;
 
-        return entry.getValue();
+    
+            //since, data is sorted , you can check by lexicographical manner and exit if we exceed.
+            if (keyFromSST.compareTo(key) > 0)
+                break;
+
+            if (keyFromSST.equals(key))
+                return entry.getValue();
+        }
+
+        return null;
     }
 
     public void loadFromIndexFile() throws IOException {
-        String path = Paths.get(this.dirName, this.indexFile).toString();
+        String path = Paths.get(dirName, indexFile).toString();
     
         List<String> lines = Files.readAllLines(Paths.get(path));
 
@@ -149,7 +173,7 @@ public class SSTable {
         }
 
         for (String line : lines) {
-            String[] parts = line.split(":", 2);
+            String[] parts = line.split(Pattern.quote(DELIMITER), 2);
             if (parts.length == 2) {
             indexMap.put(parts[0], Long.parseLong(parts[1]));
             }

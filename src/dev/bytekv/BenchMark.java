@@ -10,8 +10,6 @@ public class BenchMark {
     public static void main(String[] args) throws Exception {
         KVStore kv = KVStore.createDB(30, 150, "logs", 3500);
 
-        kv.logging(true);
-
         ExecutorService exec = Executors.newFixedThreadPool(8);
         Random rand = new Random();
 

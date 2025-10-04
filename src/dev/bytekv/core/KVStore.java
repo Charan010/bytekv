@@ -13,7 +13,6 @@ public interface KVStore {
     
     void shutDown();
     void compactLogging(boolean flag);
-    void logging(boolean flag);
     void replayLogs();
     void flush();
 
