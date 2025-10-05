@@ -1,31 +1,50 @@
-# ByteKV😛:
+## ByteKV 🤠:
 
-#### A Java-Based Multithreaded Key-Value store focused on speed, reliability and persistence of data,It has LSM trees for storage, write ahead logging for replayability when instance crashes, TTL  support for automatic data eviction and LRU caching for fetching faster.
+#### Built in Java with multithreading at its core, reliability. It is kind of borrowed from facebook's RocksDB. I wanted to understand how to write stuff at scale and design.
 
-## Key Features:
+-----------------------------------
 
-#### *LSM-Trees* - most useful for writes where sorting and storing is done in background    when compared to on average O(logn) time for B or B+ trees.
+###  What Makes It Not Suck🔥 ?
 
-#### *Write ahead logging* - to guarantee data persistence even if instance crashes.
+#### **LSM Trees** : Write-optimized implementation compared to O(log n) B-trees. Sorting and storage happen in the background while you can serve other requests.
 
-#### *Protobuf logging* - to reduce file size, using binary protobuf which could be faster to write and parse.
+#### **Write-Ahead Logging** : Data can be replayed from WAL file if there is any crash.
 
-#### *Asynchronous writes* - All writes are handled by a asynchronous thread which can handle flush overflow when log file compaction is going on.
+#### **Protobuf Serialization** : Compact binary format that's smaller and faster than stupid JSON data. Less disk thrashing, more throughput.
 
-#### *TTL Expiration* - Keys that can become stale are evicted lazily. ByteKV only removes expired keys once about 25% of a random sample of keys have expired, reducing unnecessary scans and keeping performance smooth.
+#### **Async Everything** : Writes are handled by asynchronous writer thread where writes are done on background to make it non blocking and increase throughput.
 
-#### *LRU caching* - To reduce reads latency which is the major bottleneck in LSM-Based databases, LRU stores hot data which can be fetched faster.
+#### **Smart TTL Expiration** :  Lazy eviction that only kicks in when ~25% of sampled keys are expired. No pointless scans burning CPU for nothing.
 
-#### *SST merging* - Using levelled compaction to decrease the number of SST and overwrite stale data.
+#### **LRU Caching** : Hot or recent data is cached to reduce read latency.
 
-#### *Bloom filters* - To overcome read latency, using bloom filters which can give false positives but never false negatives. Instead of Storing all indexes to each SST , we can sparsely store and use bloom filters when SST size is too large and memory heavy.
+#### **Leveled Compaction** :  Merging of SST to reduce storage required . Stale data gets yeeted automatically.
+
+#### **Bloom Filters** :  Probabilistic magic that tells you when a key *definitely* doesn't exist. False positives? Maybe. False negatives? Never. Shines the best when we need to iterate through a lot of SST.
+
+
+#### 🛠️ Build and Run:
+
+``` bash
+git clone github.com/Charan010/bytekv.git
+cd bytekv/
+
+# build or compile files
+./gradlew clean build
+
+# run (currently its a benchmark test)
+./gradlew run
+
+```
+
+### BenchMarks:
 
 ```markdown
-### Benchmarks
-
-- **PUTs:** 100,000 ops — avg latency 58 µs, max 49 ms, throughput ~135,860 ops/sec
-- **GETs:** 50,000 ops — avg latency 11 µs, max 1.12 ms
-
+Mixed workload Benchmark (70% read / 30% write):
+    Total ops: 200000
+    Duration: 0.92 s
+    Throughput: 217589.83 ops/sec 
+    Avg latency: 30.28 µs | Median: 19.26 µs | 95th: 52.74 µs | 99th: 371.97 µs | Max: 29.72 ms
 ```
 
 

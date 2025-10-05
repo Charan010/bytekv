@@ -8,11 +8,11 @@ import java.util.concurrent.*;
 
 public class BenchMark {
 
-    private static final int TOTAL_OPS = 200_000; // realistic volume
+    private static final int TOTAL_OPS = 200_000;
     private static final int THREADS = 8;
-    private static final double READ_RATIO = 0.7; // 70% reads, 30% writes
-    private static final int KEY_SPACE = 50_000; // smaller than total ops -> reuse = cache hits
-    private static final int TTL_PERCENT = 20;   // 20% of writes have TTL
+    private static final double READ_RATIO = 0.7;
+    private static final int KEY_SPACE = 50_000;
+    private static final int TTL_PERCENT = 20; 
     private static final int TTL_MAX_MS = 10_000;
 
     public static void main(String[] args) throws Exception {
@@ -71,7 +71,7 @@ public class BenchMark {
         double durationSec = (end - start) / 1e9;
         double throughput = TOTAL_OPS / durationSec;
 
-        System.out.printf("\n📊 Mixed workload results (%.0f%% read / %.0f%% write)\n", 
+        System.out.printf("\nMixed workload results (%.0f%% read / %.0f%% write)\n", 
             READ_RATIO * 100, (1 - READ_RATIO) * 100);
         System.out.printf("Total ops: %d\n", TOTAL_OPS);
         System.out.printf("Duration: %.2f s\n", durationSec);
