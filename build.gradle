@@ -1,0 +1,52 @@
+plugins {
+    id 'java'
+    id 'application'
+    id 'com.google.protobuf' version '0.9.4'
+}
+
+group = 'dev.bytekv'
+version = '1.0.0'
+
+repositories {
+    mavenCentral()  
+}
+
+dependencies {
+    implementation 'com.google.protobuf:protobuf-java:4.27.0'
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.10.0'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.10.0'
+    implementation 'org.hdrhistogram:HdrHistogram:2.1.12'
+
+}
+
+application {
+    mainClass = 'dev.bytekv.BenchMark'
+}
+
+protobuf {
+    protoc {
+        artifact = 'com.google.protobuf:protoc:4.27.0'
+    }
+    generatedFilesBaseDir = "$buildDir/generated/source/proto"
+}
+
+sourceSets {
+    main {
+        java {
+            srcDirs 'src/main/java', "$buildDir/generated/source/proto/main/java"
+        }
+        proto {
+            srcDirs 'proto'
+        }
+    }
+}
+
+compileJava {
+    dependsOn tasks.generateProto
+    options.encoding = 'UTF-8'
+    options.release = 17
+}
+
+test {
+    useJUnitPlatform()
+}
