@@ -16,4 +16,5 @@ message LogEntry {
   Operation op = 2;
   string key = 3;
   string value = 4;
+  uint32 checksum = 5;
 }

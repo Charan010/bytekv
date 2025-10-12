@@ -1,7 +1,10 @@
 package dev.bytekv.log;
 
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.util.zip.CRC32;
 
 import dev.bytekv.proto.LogEntryOuterClass;
 import dev.bytekv.core.KeyValue;
@@ -13,6 +16,29 @@ public class LogRestorer{
         this.keyValue = keyValue;
     }
 
+    public static boolean verifyEntry(LogEntryOuterClass.LogEntry entry) {
+    try {
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        DataOutputStream dos = new DataOutputStream(baos);
+
+        dos.writeInt(entry.getTimestamp());
+        dos.writeUTF(entry.getKey());
+        dos.writeUTF(entry.getValue());
+        dos.flush();
+
+        byte[] recordBytes = baos.toByteArray();
+
+        CRC32 crc = LogEntry.crcThreadLocal.get();
+        crc.reset();
+        crc.update(recordBytes);
+
+        return (int) crc.getValue() == entry.getChecksum();
+        } catch (Exception e) {
+            return false;
+        }
+}
+
     public void replayLogs() {
         
         System.out.println("Triggered replaying log :P");
@@ -23,8 +49,14 @@ public class LogRestorer{
 
             /* im currently using protobuf to store log in binary format for faster writes and retrivals */
             LogEntryOuterClass.LogEntry entry = LogEntryOuterClass.LogEntry.parseDelimitedFrom(fis);
+            
             if (entry == null)
                 break;
+
+            if (!verifyEntry(entry)) {
+                System.err.println("Corrupted WAL entry detected! Stopping replay.");
+                break; 
+            }
 
             String key = entry.getKey();
             String value = entry.getValue();

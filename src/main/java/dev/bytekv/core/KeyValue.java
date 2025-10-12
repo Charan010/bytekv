@@ -30,6 +30,7 @@ public class KeyValue implements KVStore{
     private final String logPath;
     private final int blockingQueueSize;
 
+    @SuppressWarnings("unused")
     private boolean isCompactLoggingOn = false;
     private Thread compactLoggingThread;
     Thread ttlManagerThread;
@@ -50,7 +51,7 @@ public class KeyValue implements KVStore{
 
     public int memTableLimit;
 
-    public KeyValue(int threadPoolSize,int BlockingQueueSize ,String logFilePath, String logPath, int memTableLimit) throws IOException
+    public KeyValue(int threadPoolSize,int BlockingQueueSize ,String logFilePath ,String logPath, int memTableLimit) throws IOException
      {
         this.logFilePath = logFilePath;
         this.logPath = logPath;
