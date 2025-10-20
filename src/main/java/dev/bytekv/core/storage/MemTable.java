@@ -4,22 +4,27 @@ import java.util.*;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.io.*;
 
+import dev.bytekv.core.WALWriter;
+
 public class MemTable {
 
-    private static final int DEFAULT_FLUSH_THRESHOLD = 1024;
+    private static final int DEFAULT_FLUSH_THRESHOLD = 2500;
     private static final String TOMBSTONE = "__<deleted>__";
 
     private final ConcurrentSkipListMap<String, String> buffer = new ConcurrentSkipListMap<>();
     private final SSTManager sstManager;
     private final int flushThreshold;
 
-    public MemTable(SSTManager sstManager) {
-        this(sstManager, DEFAULT_FLUSH_THRESHOLD);
+    private WALWriter walWriter;
+
+    public MemTable(SSTManager sstManager, WALWriter walWriter) {
+        this(sstManager, DEFAULT_FLUSH_THRESHOLD, walWriter);
     }
 
-    public MemTable(SSTManager sstManager, int flushThreshold) {
+    public MemTable(SSTManager sstManager, int flushThreshold, WALWriter walWriter) {
         this.sstManager = sstManager;
         this.flushThreshold = flushThreshold;
+        this.walWriter = walWriter;
     }
 
     public void put(String key, String value) throws IOException {
@@ -63,6 +68,7 @@ public class MemTable {
         new Thread(() -> {
             try {
                 sstManager.flushToSSTable(snapShot);
+                walWriter.truncateWALFile();
             } catch (IOException e) {
                 e.printStackTrace();
             }

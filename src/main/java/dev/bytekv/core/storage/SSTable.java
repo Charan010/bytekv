@@ -38,8 +38,7 @@ public class SSTable {
 
     private BloomFilter bloomFilter; 
     
-    private long offSet = 0;
-
+    private long offset = 0;
 
     /*
        * indexWriter is a wrapper to simple FileWriter which keeps a memory buffer to batchWrite to .index file.
@@ -51,7 +50,6 @@ public class SSTable {
     private RandomAccessFile dataSeeker;
     private DataOutputStream dataOut; 
 
-    private static final String TOMBSTONE = "__<deleted>__";
     private static final String DELIMITER = "::||::";
     
     private long lastSeenIndexLength = 0;
@@ -76,7 +74,7 @@ public class SSTable {
 
         indexWriter = new BufferedWriter(new FileWriter(indexPath));
         dataSeeker = new RandomAccessFile(dataPath, "r");
-        dataOut = new DataOutputStream(new FileOutputStream(Paths.get(dirName, dataFile).toString(), true));
+        dataOut = new DataOutputStream(new FileOutputStream(dataPath, true));
 
     }
 
@@ -92,7 +90,7 @@ public class SSTable {
 
         this.dataSeeker = new RandomAccessFile(dataPath, "r");
         this.indexMap = new LinkedHashMap<>();
-        dataOut = new DataOutputStream(new FileOutputStream(Paths.get(dirName, dataFile).toString(), true));
+        dataOut = new DataOutputStream(new FileOutputStream(dataPath, true));
 
         loadFromIndexFile();
     }
@@ -102,38 +100,83 @@ public class SSTable {
     }
 
     public void put(String key, String value) throws IOException {
-        boolean isTombStone = TOMBSTONE.equals(key);
 
         long ts = System.currentTimeMillis();
 
-       SSTWriteOuterClass.SSTWrite entry = SSTWriteOuterClass.SSTWrite.newBuilder()
-        .setTimestamp(ts)
-        .setKey(key)
-        .setValue(value)
-        .setIsTombstone(isTombStone)
-        .build();
+        SSTWriteOuterClass.SSTWrite entry = SSTWriteOuterClass.SSTWrite.newBuilder()
+                .setTimestamp(ts)
+                .setKey(key)
+                .setValue(value)
+                .setIsTombstone(false)
+                .build();
 
         byte[] bytes = entry.toByteArray();
-        
+
+        long entryOffset = offset;
+
         dataOut.writeInt(bytes.length);
         dataOut.write(bytes);
 
         if(lastSeenIndexLength > MAX_SPARSE_INDEX){
-            indexWriter.write(key + DELIMITER + this.offSet + "\n");
-            indexMap.put(key, offSet);
+            indexWriter.write(key + DELIMITER + entryOffset + "\n");
+            indexMap.put(key, entryOffset);
             lastSeenIndexLength = 0;
         }
 
-        offSet += 4 + bytes.length;
+        offset += 4 + bytes.length;
         lastSeenIndexLength += (4 + bytes.length);
+
         bloomFilter.add(key);
+    }
+
+     public void delete(String key) throws IOException {
+
+        if(key == null)
+            return ;
+
+        long ts = System.currentTimeMillis();
+
+        SSTWriteOuterClass.SSTWrite entry = SSTWriteOuterClass.SSTWrite.newBuilder()
+                .setTimestamp(ts)
+                .setKey(key)
+                .setValue("")
+                .setIsTombstone(true)
+                .build();
+
+        byte[] bytes = entry.toByteArray();
+
+        long entryOffset = offset;
+
+        dataOut.writeInt(bytes.length);
+        dataOut.write(bytes);
+
+        if(lastSeenIndexLength > MAX_SPARSE_INDEX){
+            indexWriter.write(key + DELIMITER + entryOffset + "\n");
+            indexMap.put(key, entryOffset);
+            lastSeenIndexLength = 0;
+        }
+
+        offset += 4 + bytes.length;
+        lastSeenIndexLength += (4 + bytes.length);
+
     }
 
     void flush() {
         try {
             dataOut.flush();
             indexWriter.flush();
-        }   catch(IOException e) {
+        } catch(IOException e) {
+            System.out.println(e.getMessage());
+        }
+    }
+
+    public void close() {
+        try {
+
+            dataOut.close();
+            indexWriter.close();
+            dataSeeker.close();
+        } catch(IOException e) {
             System.out.println(e.getMessage());
         }
     }
@@ -150,8 +193,8 @@ public class SSTable {
                 break;
         }
 
-        long startOffSet = (nearest == null) ? 0 : nearest.getValue();
-        dataSeeker.seek(startOffSet);
+        long startOffset = (nearest == null) ? 0 : nearest.getValue();
+        dataSeeker.seek(startOffset);
 
         while (dataSeeker.getFilePointer() < dataSeeker.length()) {
             int length = dataSeeker.readInt();
@@ -167,9 +210,8 @@ public class SSTable {
 
                 * Since, to find data in SST, we iterate through latest sorted string tables to get consistent data . So ,we can ensure that data would be marked as 
                 deleted and when SST compaction occurs, this data would be permanently deleted.
-             
             */
-            if (keyFromSST.equals(key) && entry.getIsTombstone())
+            if (keyFromSST.equals(key) && entry.getIsTombstone() && entry.getValue().equals(""))
                 return null;
 
             /*
@@ -196,16 +238,16 @@ public class SSTable {
             return;
         }
         for (String line : lines) {
-
         /*
+
             * Pattern.quote(DELIMITER) uses regex engine internally to escape DELIMITER sequence if key contains DELIMITER sequence.
             This way splitting of key,offset is done with proper edgecase.
+
         */
             String[] parts = line.split(Pattern.quote(DELIMITER), 2);
             if (parts.length == 2) {
-            indexMap.put(parts[0], Long.parseLong(parts[1]));
+                indexMap.put(parts[0], Long.parseLong(parts[1]));
             }
         }
     }
-
 }

@@ -4,7 +4,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.*;
-import dev.bytekv.core.KeyValue;
 import dev.bytekv.core.StoreEntry;
 
 /*
@@ -17,15 +16,15 @@ import dev.bytekv.core.StoreEntry;
 
 public class TTLManager implements Runnable {
 
-    private final KeyValue keyValue;
     private volatile boolean running = true;
     private final CountDownLatch shutdownLatch;
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     private final Random random = ThreadLocalRandom.current();
+    private static ConcurrentHashMap<String, StoreEntry> ttlEntries;
 
-    public TTLManager(KeyValue keyValue, CountDownLatch shutdownLatch) {
-        this.keyValue = keyValue;
+    public TTLManager(ConcurrentHashMap<String, StoreEntry> ttlentries,CountDownLatch shutdownLatch) {
         this.shutdownLatch = shutdownLatch;
+        ttlEntries = ttlentries;
     }
 
     public void stopIt() {
@@ -49,11 +48,11 @@ public class TTLManager implements Runnable {
             if (!running) return;
 
             int expiredCount = 0;
-            int sampleSize = Math.min(20, keyValue.ttlEntries.size());
+            int sampleSize = Math.min(20, ttlEntries.size());
             if (sampleSize == 0) return;
 
             // sample random entries
-            List<StoreEntry> values = keyValue.ttlEntries.values().stream().toList();
+            List<StoreEntry> values = ttlEntries.values().stream().toList();
             for (int i = 0; i < sampleSize; i++) {
                 StoreEntry se = values.get(random.nextInt(values.size()));
                 if (se.TTL && System.currentTimeMillis() > se.expiryTime)
@@ -71,7 +70,7 @@ public class TTLManager implements Runnable {
 
     // full scan removes expired entries from the actual ttlEntries map
     private void ttlChecker() {
-        Iterator<StoreEntry> it = keyValue.ttlEntries.values().iterator();
+        Iterator<StoreEntry> it = ttlEntries.values().iterator();
         long now = System.currentTimeMillis();
         int removed = 0;
 

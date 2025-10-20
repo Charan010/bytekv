@@ -12,6 +12,7 @@ package dev.bytekv.log;
 
 import dev.bytekv.proto.LogEntryOuterClass;
 
+/* 
 import java.io.*;
 import java.nio.file.*;
 import java.util.*;
@@ -20,26 +21,16 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.CountDownLatch;
 
-import dev.bytekv.core.KeyValue;
-
 public class LogCompact implements Runnable {
 
     private final String logFilePath;
-    private final String logDir;
+    private final String logDir = "";
     private static final long MAX_ENTRIES = 1000;
     private volatile boolean running = true;
     private CountDownLatch shutdownLatch;
 
-    private Boolean backPressureOn;
-
-    private KeyValue kv;
-
-    public LogCompact(String logFilePath, String logDir,CountDownLatch latch, KeyValue kv, Boolean backPressureOn) {
+    public LogCompact(String logFilePath) {
         this.logFilePath = logFilePath;
-        this.logDir = logDir;
-        this.backPressureOn = backPressureOn;
-        this.kv = kv;
-        shutdownLatch = latch;
     }
 
     public void stopIt(){
@@ -59,7 +50,7 @@ public class LogCompact implements Runnable {
             try {
                 long currentEntries = LogEntry.returnSerialNumber();
                 if (currentEntries > MAX_ENTRIES) {
-                    backPressureOn = true;
+                    //cOn = true;
                     compactLog();
                 }
             } catch (Exception e) {
@@ -120,7 +111,9 @@ public class LogCompact implements Runnable {
         }
         
         finally{
-            backPressureOn = false;
+         System.out.println("do nothing");   
         }
     }
 }
+
+*/

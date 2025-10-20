@@ -4,19 +4,24 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.nio.file.Paths;
 import java.util.zip.CRC32;
 
 import dev.bytekv.proto.LogEntryOuterClass;
 import dev.bytekv.core.KeyValue;
+import dev.bytekv.core.storage.MemTable;
 
 public class LogRestorer{
-    KeyValue keyValue;
+    
+    String logPath;
+    MemTable memTable;
 
-    public LogRestorer(KeyValue keyValue){
-        this.keyValue = keyValue;
+    public LogRestorer(String logPath, MemTable memTable){
+        this.logPath = logPath;
+        this.memTable = memTable;
     }
 
-    public static boolean verifyEntry(LogEntryOuterClass.LogEntry entry) {
+   /*  public static boolean verifyEntry(LogEntryOuterClass.LogEntry entry) {
     try {
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -37,12 +42,12 @@ public class LogRestorer{
         } catch (Exception e) {
             return false;
         }
-}
+} */
 
     public void replayLogs() {
         
         System.out.println("Triggered replaying log :P");
-        String logFilepath = keyValue.logFilePath;
+        String logFilepath = Paths.get(logPath, "master.log").toString();
 
         try (FileInputStream fis = new FileInputStream(logFilepath)) {
             while (true) {
@@ -53,10 +58,10 @@ public class LogRestorer{
             if (entry == null)
                 break;
 
-            if (!verifyEntry(entry)) {
+            /*if (!verifyEntry(entry)) {
                 System.err.println("Corrupted WAL entry detected! Stopping replay.");
                 break; 
-            }
+            }*/
 
             String key = entry.getKey();
             String value = entry.getValue();
@@ -75,10 +80,10 @@ public class LogRestorer{
             System.out.println("Operation: " + operation + " key: " + key + " value: " + value);
             
             if(operation.equals("PUT"))
-                keyValue.memTable.put(key , value);
+                memTable.put(key , value);
             
             else if(operation.equals("DELETE"))
-                keyValue.memTable.delete(key);
+                memTable.delete(key);
                 
         }
     } catch (IOException e) {

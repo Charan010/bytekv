@@ -3,6 +3,8 @@ package dev.bytekv.core.storage;
 import java.io.*;
 import java.nio.file.*;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import dev.bytekv.proto.SSTWriteOuterClass;
 
@@ -23,23 +25,27 @@ public class SSTManager {
     private final Map<Integer, List<SSTable>> levels = new TreeMap<>();
     private final int MAX_SST_PER_LEVEL = 4;
 
+    private final ExecutorService compactionExecutor; 
+
     public AtomicInteger getSSTCount() {
         return sstCounter;
     }
 
     public SSTManager() throws IOException{   
         repopulateIndexes();
+        compactionExecutor = Executors.newSingleThreadExecutor();
     }
 
     /*
         * During startup or crash,to load all SST into memory and their indices to access, we need to somehow repopulate SST objects.
         But the main issue is that SST numbers can vary a lot because of merging logic.
         
-        * Either,We can sort all folders in ascending order and start renaming them from sstable-001 to so on.. which is most viable option but also takes time.
+        * Either, We can sort all folders in ascending order and start renaming them from sstable-001 to so on.. which is most viable option but also takes time.
         Or we can simply iterate through all SST and store maximum SST value that we have came across and set our sstCounter to max.
         I'm going with latter option to reduce time to repopulate SS tables.
     
     */
+    
     public void repopulateIndexes() throws IOException {
         File dir = new File("SST");
         File[] folders = dir.listFiles(File::isDirectory);
@@ -79,19 +85,25 @@ public class SSTManager {
     public void flushToSSTable(TreeMap<String, String> memtable) throws IOException {
         int id = sstCounter.incrementAndGet();
         SSTable sst = new SSTable(id);
-
+    
         for (Map.Entry<String, String> entry : memtable.entrySet()) {
             sst.put(entry.getKey(), entry.getValue());
         }
-
+    
         sst.flush();
         sst.loadFromIndexFile();
-
-        levels.computeIfAbsent(0, k -> new ArrayList<>()).add(sst);
-
-        System.out.println("Flushed memtable to SSTable #" + id);
-        tieredCompaction();
-
+    
+        synchronized(this) {
+            levels.computeIfAbsent(0, k -> new ArrayList<>()).add(sst);
+        }
+    
+        compactionExecutor.submit(() -> {
+            try {
+                tieredCompaction();
+            } catch (IOException e) {
+                System.err.println("Compaction failed: " + e);
+            }
+        });
     }
 
     public List<SSTable> getAllSSTables() {
@@ -111,6 +123,7 @@ public class SSTManager {
                     file.delete();
             }
         }
+        
         folder.delete();
     }
 
@@ -149,35 +162,39 @@ public class SSTManager {
         SSTable merged = new SSTable(sstCounter.incrementAndGet());
         List<DataInputStream> streams = new ArrayList<>();
 
-        /* 
-             * to merge entries into one SST, I'm using k-way merge where we take data entries from each SST and if the key is found to be duplicate then
-               newer SST value gets written into new SST because they are true or consistent value. if no conflict, then simply write all data into new SST.
-        */
+    /* 
+         * to merge entries into one SST, I'm using k-way merge where we take data entries from each SST and if the key is found to be duplicate then
+           newer SST value gets written into new SST because they are true or consistent value. if no conflict, then simply write all data into new SST.
+    */
 
         PriorityQueue<Entry> pq = new PriorityQueue<>((e1, e2) -> {
-            int cmp = e1.key.compareTo(e2.key); 
-            if (cmp != 0)
-                 return cmp;
-            return Integer.compare(e1.sstIndex, e2.sstIndex); // conflict of same keys ? write value of newer SST.
+        int cmp = e1.key.compareTo(e2.key); 
+        if (cmp != 0)
+             return cmp;
+
+        // conflict of same keys ? write value of newer SST.
+        return Integer.compare(e2.sstIndex, e1.sstIndex);
         });
 
-        try{
+        try {
             for (int i = 0; i < sstables.size(); i++) {
                 SSTable sst = sstables.get(i);
                 Path path = Paths.get("SST", sst.getSSTName(), sst.getSSTName() + ".data");
-                DataInputStream dis = new DataInputStream(new FileInputStream(path.toFile()));
+                DataInputStream dis = new DataInputStream(new BufferedInputStream(new FileInputStream(path.toFile())));
                 streams.add(dis);
 
-                if (dis.available() > 0) {
+                try {
                     int len = dis.readInt();
                     byte[] buf = new byte[len];
                     dis.readFully(buf);
 
                     SSTWriteOuterClass.SSTWrite msg = SSTWriteOuterClass.SSTWrite.parseFrom(buf);
                     pq.add(new Entry(msg.getKey(), msg.getValue(), dis, i));  
+                } catch (EOFException ignored) {
+                    dis.close(); 
                 }
             }
-          
+
             String lastKey = null;
 
             while (!pq.isEmpty()) {
@@ -188,24 +205,29 @@ public class SSTManager {
                     lastKey = smallest.key;
                 }
 
-                if (smallest.stream.available() > 0) {
-                    int len = smallest.stream.readInt();
+                DataInputStream dis = smallest.stream;
+                try {
+                    int len = dis.readInt();
                     byte[] buf = new byte[len];
-                    smallest.stream.readFully(buf);
-                    SSTWriteOuterClass.SSTWrite msg = SSTWriteOuterClass.SSTWrite.parseFrom(buf);
+                    dis.readFully(buf);
 
-                    pq.add(new Entry(msg.getKey(), msg.getValue(), smallest.stream, smallest.sstIndex));
+                    SSTWriteOuterClass.SSTWrite msg = SSTWriteOuterClass.SSTWrite.parseFrom(buf);
+                    pq.add(new Entry(msg.getKey(), msg.getValue(), dis, smallest.sstIndex));
+                } catch (EOFException eof) {
+                    dis.close(); 
                 }
             }
         } finally {
-            for (DataInputStream dis : streams)
-                dis.close();
+            for (DataInputStream dis : streams) {
+                try { dis.close(); } catch (IOException ignored) {}
+            }
         }
 
         merged.flush();
         merged.loadFromIndexFile();
         return merged;
     }
+
 
     private static class Entry {
         String key, value;

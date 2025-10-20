@@ -2,63 +2,67 @@ package dev.bytekv.core;
 
 import dev.bytekv.proto.LogEntryOuterClass;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.BufferedOutputStream;
-import java.io.IOException;
+import java.io.*;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.CompletableFuture;
-
+import java.util.concurrent.*;
 
 public class WALWriter {
-    private final FileOutputStream fos;
-    private final BufferedOutputStream bos;  
+    private  FileOutputStream fos;
+    private  BufferedOutputStream bos;
+    private LinkedBlockingQueue<LogEntryOuterClass.LogEntry> queue;
 
-    private final LinkedBlockingQueue<LogEntryOuterClass.LogEntry> queue;
-    private final Thread writerThread;
-    private final Thread flushThread;
+    private final ExecutorService writerExecutor;
+    private final ScheduledExecutorService flushExecutor;
+
+    private volatile boolean failed = false;
     private volatile boolean running = true;
 
-    private final int MAX_BATCH_SIZE = 200;  
-    private final int FLUSH_INTERVAL_MS = 200;   
-    private final int QUEUE_CAPACITY = 10_000;   
+    String logFilePath;
+    private File f; 
+
+    private final int MAX_BATCH_SIZE = 200;
+    private final int QUEUE_CAPACITY = 10_000;
+    private final int FLUSH_INTERVAL_MS = 200;
     private final int SYNC_INTERVAL_MS = 500;
     private final int BUFFER_SIZE = 128 * 1024;
-
-
-    /*
-        * MAX_BATCH_SIZE - amount of entries to be drained from queue to batch write to WAL file.
-        * FLUSH_INTERVAL_MS - periodic time to flush which forces to JVM cache to be flushed to OS.
-     
-       * SYNC_INTERVAL_MS - This is a blocking task which forces data to be persisted to harddisk and wait for acknowledgement.
-         Tradeoffs:
-        - If the SNYC_INTERVAL_MS is too less, then it would lead to lot of work and if it's more then there is chance of data loss
-        when database crashes.
-                
-       * BUFFER_SIZE - maximum amount of data BufferedOutputStream can take to reduce number of system calls.
-    */
-
-    public WALWriter(String logFilePath) throws IOException {
-        File f = new File(logFilePath);
+    private CountDownLatch shutCountDownLatch;
+    
+    public WALWriter(String logFilePath, CountDownLatch countDownLatch) throws IOException {
+        f = new File(logFilePath);
         f.getParentFile().mkdirs();
 
-        this.fos = new FileOutputStream(f, true);
-        this.queue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
-        this.bos = new BufferedOutputStream(fos, BUFFER_SIZE);  
+        shutCountDownLatch = countDownLatch;
 
-        writerThread = new Thread(this::processLoop, "WAL-Writer");
-        writerThread.start();
+        this.logFilePath = logFilePath;
+        fos = new FileOutputStream(f, true);
+        bos = new BufferedOutputStream(fos, BUFFER_SIZE);
+        queue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
 
-        flushThread = new Thread(this::periodicFlushLoop, "WAL-Periodic-Flush");
-        flushThread.start();
+        writerExecutor = Executors.newSingleThreadExecutor(r -> new Thread(r, "WAL-Writer"));
+        flushExecutor = Executors.newSingleThreadScheduledExecutor(r -> new Thread(r, "WAL-FlushSync"));
+
+        writerExecutor.submit(this::processLoop);
+        flushExecutor.scheduleAtFixedRate(this::flushAndSync, FLUSH_INTERVAL_MS, FLUSH_INTERVAL_MS, TimeUnit.MILLISECONDS);
     }
 
-    public void writeToLog(LogEntryOuterClass.LogEntry entry) throws IOException, InterruptedException {
-            if (!queue.offer(entry, 30, TimeUnit.MILLISECONDS))
+    public void stopIt(){
+        running = false;
+    }
+
+
+
+
+    public void writeToLog(LogEntryOuterClass.LogEntry entry) throws IOException {
+        if (failed) throw new IOException("WAL in failed state!");
+        try {
+            if (!queue.offer(entry, 30, TimeUnit.MILLISECONDS)) {
                 throw new IOException("WAL queue overflow");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while enqueuing WAL entry", e);
+        }
     }
 
     private void processLoop() {
@@ -66,72 +70,88 @@ public class WALWriter {
         try {
             while (running || !queue.isEmpty()) {
                 batch.clear();
-
-            /*
-              * Once, queue has enough entries, drain all entries upto MAX_BATCH_SIZE to be written in log file batch wise. 
-            */
                 queue.drainTo(batch, MAX_BATCH_SIZE);
 
                 if (batch.isEmpty()) {
-                    Thread.sleep(5); 
+                    Thread.sleep(5);
                     continue;
                 }
-                for (LogEntryOuterClass.LogEntry entry : batch) {
-                    entry.writeDelimitedTo(bos);
+
+                synchronized (bos) {
+                    for (LogEntryOuterClass.LogEntry entry : batch) {
+                        entry.writeDelimitedTo(bos);
+                    }
                 }
             }
         } catch (Exception e) {
+            failed = true;
             e.printStackTrace();
+
+        }finally{
+            shutCountDownLatch.countDown();
         }
     }
 
-   private void periodicFlushLoop() {
-
-        long lastSyncTime = System.currentTimeMillis();
-        try {
-            while (running) {
-                Thread.sleep(FLUSH_INTERVAL_MS);
-                synchronized (bos) {
-                bos.flush();
-                }
-
-                long now = System.currentTimeMillis();
-                if (now - lastSyncTime >= SYNC_INTERVAL_MS) {
-
-    /*
-        * fos.getFD().sync() is a blocking thread which force flushes os page cache as well to make sure the data is actually persisted
-         in the disk. This is time consuming because it waits until OS sends some kind of acknowlegement that data is succesfully stored in
-         the disk. So, I'm asynchronously force flushing.
-    */
-                    CompletableFuture.runAsync(this::sync); 
-                    lastSyncTime = now;
-                }
-            }
-        }   catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    private void sync() {
+    
+    private void flushAndSync() {
         try {
             synchronized (bos) {
                 bos.flush();
-                fos.getFD().sync();
+            }
+
+            long now = System.currentTimeMillis();
+            if (now % SYNC_INTERVAL_MS < FLUSH_INTERVAL_MS) {
+                synchronized (bos) {
+
+        /*
+            * fos.getFD().sync() is a blocking thread which force flushes os page cache as well to make sure the data is actually persisted
+            in the disk. This is time consuming because it waits until OS sends some kind of acknowlegement that data is succesfully stored in
+            the disk. So, I'm asynchronously force flushing.
+        */
+                    fos.getFD().sync();
+                }
             }
         } catch (IOException e) {
+            failed = true;
             e.printStackTrace();
         }
     }
-    
-    public void shutDown() throws IOException, InterruptedException {
+
+    public void truncateWALFile() throws IOException {
+        System.out.println("Truncating WAL file :///");
+        synchronized (bos) {
+            bos.flush();
+            bos.close();
+            fos.close();
+        }
+
+        new FileOutputStream(logFilePath, false).close();
+        this.fos = new FileOutputStream(f, true);
+        this.bos = new BufferedOutputStream(fos, BUFFER_SIZE);
+    }
+
+
+    public void shutDown() throws IOException {
         running = false;
-        writerThread.join();
-        flushThread.join();
+
+        writerExecutor.shutdown();
+        flushExecutor.shutdown();
+
+        try {
+            writerExecutor.awaitTermination(5, TimeUnit.SECONDS);
+            flushExecutor.awaitTermination(5, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
 
         synchronized (bos) {
             bos.flush();
             fos.getFD().sync();
             bos.close();
         }
+    }
+
+    public boolean isFailed() {
+        return failed;
     }
 }

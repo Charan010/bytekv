@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.Serializable;
 import java.time.Instant;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.CRC32;
 
 import dev.bytekv.proto.LogEntryOuterClass;
@@ -20,12 +21,8 @@ public class LogEntry implements Serializable {
         PUT, DELETE
     }
 
-    private static volatile int serialNumber = 0;
-    private static int lastTimestamp = 0;
-
-    public static long returnSerialNumber() {
-         return serialNumber; 
-    }
+    private static final AtomicLong serialNumber = new AtomicLong(0);
+    private static volatile long lastTimestamp = 0;
 
     public static final ThreadLocal<CRC32> crcThreadLocal = ThreadLocal.withInitial(CRC32::new);
 
@@ -36,26 +33,22 @@ public class LogEntry implements Serializable {
         this.timeStamp = Instant.now().toEpochMilli();
     }
 
-    public static long getSerialNumber() {
-        return serialNumber;
+    public long getSerialNumber() {
+        return serialNumber.get();
     }
 
     public LogEntryOuterClass.LogEntry toProto() {
-        ++serialNumber;
 
-        int delta = (int) (this.timeStamp - lastTimestamp);
-        lastTimestamp = (int) this.timeStamp;
-
-    /* * Each timestamp takes around 4 bytes of memory to write to a file. Since, I'm expecting this to be used for some kind of time series stuff.
-    I'm using delta variant as timestamp values would always be monotonic (i.e same or increasing values). * So, timestamps can be written in only 1 byte
-    because we are only storing differences compared to older timestamp. */
+        long delta = this.timeStamp - lastTimestamp;
+        lastTimestamp = this.timeStamp;
+        serialNumber.incrementAndGet();
 
         byte[] recordBytes;
         try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             DataOutputStream dos = new DataOutputStream(baos);
 
-            dos.writeInt(delta);
+            dos.writeLong(delta); 
             dos.writeUTF(this.key);
             dos.writeUTF(this.value != null ? this.value : "");
             dos.flush();
@@ -68,7 +61,7 @@ public class LogEntry implements Serializable {
         CRC32 crc = crcThreadLocal.get();
         crc.reset();
         crc.update(recordBytes);
-        checkSum = crc.getValue();
+        checkSum = crc.getValue(); 
 
         LogEntryOuterClass.LogEntry.Operation protoOp =
                 this.operation == Operation.PUT
@@ -76,11 +69,11 @@ public class LogEntry implements Serializable {
                         : LogEntryOuterClass.LogEntry.Operation.DELETE;
 
         return LogEntryOuterClass.LogEntry.newBuilder()
-                .setTimestamp(delta)
+                .setTimestamp((int)delta) 
                 .setOp(protoOp)
                 .setKey(this.key)
                 .setValue(this.value != null ? this.value : "")
-                .setChecksum((int) checkSum)
+                //.setChecksum(checkSum)
                 .build();
     }
 }
