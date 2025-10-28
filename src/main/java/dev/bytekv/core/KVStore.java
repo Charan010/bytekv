@@ -1,13 +1,13 @@
 package dev.bytekv.core;
 
-import java.util.concurrent.Future;
+import java.util.concurrent.CompletableFuture;
 
 public interface KVStore {
-    Future<String> put(String key, String value);
-    Future<String> put(String key, String value, long expiryTime);
-    Future<String> getTTL(String key);
-    Future<String> get(String key);
-    Future<String> delete(String key);
+    CompletableFuture<String> put(String key, String value);
+    CompletableFuture<String> put(String key, String value, long expiryTime);
+    CompletableFuture<String> getTTL(String key);
+    CompletableFuture<String> get(String key);
+    CompletableFuture<String> delete(String key);
     void forceFlush();
 
     enum ETIME {

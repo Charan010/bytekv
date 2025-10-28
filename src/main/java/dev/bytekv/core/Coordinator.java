@@ -98,69 +98,77 @@ public class Coordinator implements KVStore{
                 }
             }
         );
-
-
-        //logRestorer.replayLogs();
-    }
-
-    
-    @Override
-    public Future<String> get(String key){
-            return threadPool.submit(() -> {
-                try{
-                    readerLock.lock();
-                    String ans = cache.get(key);
-                    if(ans != null)
-                        return ans;
-                    return memTable.get(key);
-
-                }finally{
-                    readerLock.unlock();
-                }
-        });
+        logRestorer.replayLogs();
     }
 
     @Override
-     public Future<String> put(String key ,String value){
-        return threadPool.submit(() -> {
-            
-            LogEntry entry = new LogEntry(LogEntry.Operation.PUT, key, value);
-            writer.writeToLog(entry.toProto());
+    public CompletableFuture<String> get(String key) {
+        return CompletableFuture.supplyAsync(() -> {
 
-            try{
-                writerLock.lock();
-                cache.put(key, value);
-                memTable.put(key,value);
-                return "OK!";
-
-            }catch(IOException e){
-                return "ERROR: log file not initialized properly";
-            }finally{
-                writerLock.unlock();
-            }
-        });
-    }
-
-    @Override
-    public Future<String> delete(String key) {
-        return threadPool.submit(() -> {
             if(key == null)
-                return "ERROR: null key";
+                return null;
 
-            LogEntry logEntry = new LogEntry(LogEntry.Operation.DELETE, key, null);
-            writer.writeToLog(logEntry.toProto());
+            readerLock.lock();
             try {
-                writerLock.lock();
-                memTable.delete(key);
-                cache.delete(key);
-                return "OK!";
+                String ans = cache.get(key);
+                if (ans != null) return ans;
+                return memTable.get(key); 
+            } catch (IOException e) {
+                throw new RuntimeException(e); 
+            } finally {
+                readerLock.unlock();
+            }
+        }, threadPool);
+    }
+
+    @Override
+    public CompletableFuture<String> put(String key, String value) {
+        return CompletableFuture.supplyAsync(() -> {
             
-            } catch (IOException error) {
-                return "ERROR: log file not initialized properly";
+            try {
+                LogEntry entry = new LogEntry(LogEntry.Operation.PUT, key, value);
+                writer.writeToLog(entry.toProto()); 
+            } catch (IOException e) {
+                throw new RuntimeException("ERROR: log file not initialized properly", e);
+            }
+
+            writerLock.lock();
+            try {
+                cache.put(key, value);
+                memTable.put(key, value);
+                return "OK!";
+            } catch (IOException e) {
+                throw new RuntimeException("ERROR: failed to write to memTable", e);
             } finally {
                 writerLock.unlock();
             }
-        });
+        }, threadPool);
+    }
+
+    @Override
+    public CompletableFuture<String> delete(String key) {
+        return CompletableFuture.supplyAsync(() -> {
+            if (key == null)
+                return null;
+
+            try {
+                LogEntry logEntry = new LogEntry(LogEntry.Operation.DELETE, key, null);
+                writer.writeToLog(logEntry.toProto()); 
+            } catch (IOException e) {
+                throw new RuntimeException("ERROR: log file not initialized properly", e);
+            }
+
+            writerLock.lock();
+            try {
+                memTable.delete(key);
+                cache.delete(key);
+                return "OK!";
+            } catch (IOException e) {
+                throw new RuntimeException("ERROR: failed to delete from memTable/cache", e);
+            } finally {
+                writerLock.unlock();
+            }
+        }, threadPool);
     }
 
      /*
@@ -172,40 +180,35 @@ public class Coordinator implements KVStore{
     */
 
     @Override
-     public Future<String> put(String key ,String value, long expiryTime){
-       return threadPool.submit(() -> {
-            StoreEntry se = new StoreEntry(key , value, true, expiryTime);
-            ttlEntries.put(key ,se);
+    public CompletableFuture<String> put(String key, String value, long expiryTime) {
+        return CompletableFuture.supplyAsync(() -> {
+            StoreEntry se = new StoreEntry(key, value, true, expiryTime);
+            ttlEntries.put(key, se);
             return "OK!";
-        });
+        }, threadPool);
     }
 
-
     @Override
-    public Future<String> getTTL(String key){
-        return threadPool.submit(() -> {
+    public CompletableFuture<String> getTTL(String key) {
+        return CompletableFuture.supplyAsync(() -> {
+            if (key == null)
+                 return null;
 
-        if(key == null)
-            return "ERROR: null key";
+            readerLock.lock();
+            try {
+            if (!ttlEntries.containsKey(key))
+                 return null;
 
-        readerLock.lock();
-        try{
-
-        if(!ttlEntries.containsKey(key))
-            return null;
-        StoreEntry obj = ttlEntries.get(key);
-
-        if(System.currentTimeMillis() > obj.expiryTime){
-            ttlEntries.remove(key);
-            return null;
-        }
-        return obj.value;
-
-        }finally{
+            StoreEntry obj = ttlEntries.get(key);
+            if (System.currentTimeMillis() > obj.expiryTime) {
+                ttlEntries.remove(key);
+                return null;
+            }
+            return obj.value;
+        } finally {
             readerLock.unlock();
         }
-
-        });
+    }, threadPool);
     }
 
     @Override

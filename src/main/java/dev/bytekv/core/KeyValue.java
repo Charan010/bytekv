@@ -1,72 +1,56 @@
 package dev.bytekv.core;
 
 import java.io.IOException;
-import java.util.concurrent.ExecutionException;
+import java.util.concurrent.CompletableFuture;
 
-public class KeyValue{
-        
-    Coordinator cood;
-    String logPath;
-    int memTableLimit;
+public class KeyValue {
 
-    public KeyValue(String logPath, int memTableLimit) throws IOException{
-        try{ cood = new Coordinator(logPath, memTableLimit); }
-        catch(IOException e){
+    private final Coordinator cood;
+
+    public KeyValue(String logPath, int memTableLimit) throws IOException {
+        try {
+            cood = new Coordinator(logPath, memTableLimit);
+        } catch (IOException e) {
             throw new IOException(e);
         }
-    } 
-
-    public String put(String key , String value) throws InterruptedException, ExecutionException{
-        if(key == null)
-            return "ERROR: null key";
-         
-        cood.put(key, value);
-        return "OK";
     }
 
-    public String put(String key, String value, long ms) throws InterruptedException, ExecutionException{
-        if(key == null)
-            return "ERROR: null key";
+    public CompletableFuture<String> put(String key, String value) {
+        if (key == null) return CompletableFuture.completedFuture("ERROR: null key");
 
-        long currentTime = System.currentTimeMillis() + ms;
-        cood.put(key, value, currentTime);
-        return "OK";
-
+        return cood.put(key, value); 
     }
 
-    public String get(String key) throws InterruptedException, ExecutionException{
+    public CompletableFuture<String> put(String key, String value, long ms) {
+        if (key == null) return CompletableFuture.completedFuture("ERROR: null key");
 
-        if(key == null)
-            return "ERROR: null key";
-
-        return cood.get(key).get();
+        long expiryTime = System.currentTimeMillis() + ms;
+        return cood.put(key, value, expiryTime); 
     }
 
-    public String getTTL(String key)throws InterruptedException, ExecutionException{
-        if(key == null)
-            return "ERROR: null key";
-
-        return cood.getTTL(key).get();
+    public CompletableFuture<String> get(String key) {
+        if (key == null) 
+            return CompletableFuture.completedFuture("ERROR: null key");
+        return cood.get(key); 
     }
 
-    public String delete(String key)throws InterruptedException , ExecutionException{
-        if(key == null)
-            return "ERROR: null key";
+    public CompletableFuture<String> getTTL(String key) {
+        if (key == null) return CompletableFuture.completedFuture("ERROR: null key");
 
-        cood.delete(key);
-        return "OK";
+        return cood.getTTL(key);
     }
 
-    public void forceFlush(){
+    public CompletableFuture<String> delete(String key) {
+        if (key == null) return CompletableFuture.completedFuture("ERROR: null key");
+
+        return cood.delete(key);
+    }
+
+    public void forceFlush() {
         cood.forceFlush();
     }
 
-    public void shutDown() throws InterruptedException{
-        try{
-            cood.shutDown();
-
-        }catch(InterruptedException e){
-            throw new InterruptedException(e.getMessage());
-        }
+    public void shutDown() throws InterruptedException {
+        cood.shutDown();
     }
 }

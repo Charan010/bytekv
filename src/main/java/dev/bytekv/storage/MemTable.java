@@ -44,7 +44,7 @@ public class MemTable {
         return "OK!";
     }
 
-    public String get(String key) throws IOException {
+    public String get(String key) throws IOException{
         String val = buffer.get(key);
         if (TOMBSTONE.equals(val)) return null;
         if (val != null) return val;
