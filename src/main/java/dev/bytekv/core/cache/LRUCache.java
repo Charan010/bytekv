@@ -1,4 +1,4 @@
-package dev.bytekv.core;
+package dev.bytekv.core.cache;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
