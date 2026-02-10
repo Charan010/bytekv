@@ -1,5 +1,0 @@
-threadpool: 20
-blockingQueue: 50
-memtableFlush: 1024
-diskFlushLimit: 1000
-logFolder: "logs"

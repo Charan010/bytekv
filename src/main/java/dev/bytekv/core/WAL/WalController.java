@@ -9,7 +9,7 @@ import java.util.zip.CRC32;
 Current v1 Logging format looks like:
 
 -------------------------------------------------------------
-CRC32 checksum | Key length | value length | Key | Value | OP
+CRC32 checksum | Key length | value length | OP | Key | Value | 
 ---------------------------------------------------------------
 
 OP - 0x00 - PUT
