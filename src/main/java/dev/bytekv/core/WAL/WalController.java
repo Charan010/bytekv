@@ -45,7 +45,6 @@ public final class WalController {
         this.out = new DataOutputStream(new BufferedOutputStream(fos));
     }
 
-
     public void writeToFile(WalEntry e) throws IOException {
         
         byte[] keyBytes   = e.key.getBytes(StandardCharsets.UTF_8);
